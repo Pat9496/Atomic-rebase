@@ -227,3 +227,33 @@ kwin_reconfigure() {
         qdbus org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
     fi
 }
+
+# Reads the invoking user's login/user-switcher avatar path via
+# AccountsService (org.freedesktop.Accounts on the system bus) — the one
+# avatar mechanism GNOME and KDE Plasma both already read, unlike
+# dconf/kdeglobals which are desktop-specific formats. Uses busctl (part of
+# systemd, present on every Fedora Atomic Desktop) since there's no
+# gsettings/kreadconfig equivalent for a system-bus-only property.
+# Best-effort: prints nothing if busctl, the service, or an icon isn't
+# available.
+accountsservice_icon_file() {
+    if ! command -v busctl >/dev/null 2>&1; then
+        return
+    fi
+
+    local user_obj
+    user_obj="$(busctl --system call org.freedesktop.Accounts /org/freedesktop/Accounts \
+        org.freedesktop.Accounts FindUserByName s "$(id -un)" 2>/dev/null || true)"
+    user_obj="${user_obj#o \"}"
+    user_obj="${user_obj%\"}"
+    [[ "${user_obj}" == /* ]] || return
+
+    local icon
+    icon="$(busctl --system get-property org.freedesktop.Accounts "${user_obj}" \
+        org.freedesktop.Accounts.User IconFile 2>/dev/null || true)"
+    icon="${icon#s \"}"
+    icon="${icon%\"}"
+    [[ "${icon}" == /* ]] || return
+
+    printf '%s\n' "${icon}"
+}

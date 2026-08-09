@@ -37,6 +37,12 @@ Every read is best-effort — a missing value is a `warn` and an omitted key
 in `settings.env`, never a hard failure. `restore-config.sh` records exactly
 what it applied vs. skipped for each run in `MANUAL-STEPS.txt`.
 
+## Captured for reference only (nothing to restore)
+
+| Setting      | Mechanism                                                                                                   | Why there's no restore step |
+|--------------|----------------------------------------------------------------------------------------------------------------|------------------------------|
+| User avatar (login/user-switcher icon) | `org.freedesktop.Accounts` (AccountsService) on the system bus, read via `busctl` for Silverblue (GNOME) and Kinoite (KDE Plasma) — `FindUserByName` then the `IconFile` property | Stored under `/var/lib/AccountsService`, which — like `/var/lib/flatpak` — is untouched by an ostree rebase, and GNOME's and KDE Plasma's avatar UIs already read/write that same shared property. There's no per-desktop format to translate the way there is for dark mode/wallpaper, so `backup-config.sh` records `AVATAR_PATH` in `settings.env` purely for reference and `restore-config.sh` never acts on it. Not attempted for Budgie/Sway/Cosmic — unconfirmed whether their user-management tooling (if any) reads the same AccountsService property. |
+
 ## Not migrated (set manually after switching)
 
 These have no reliable 1:1 equivalent, or depend on desktop-specific

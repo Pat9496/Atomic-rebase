@@ -39,6 +39,7 @@ fi
 source_desktop=""
 dark_mode=""
 wallpaper_path=""
+avatar_path=""
 accent_color=""
 input_layouts=""
 night_light=""
@@ -156,6 +157,9 @@ elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
     fi
     warn "KDE has no confirmed way to read the current accent color back from disk; not captured (set it manually after switching)."
 
+    avatar_path="$(accountsservice_icon_file)"
+    [[ -n "${avatar_path}" ]] || warn "Could not determine KDE user avatar via AccountsService."
+
     appletsrc="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
     if [[ -f "${appletsrc}" ]]; then
         image_line="$(awk '/^\[.*Wallpaper\]\[org\.kde\.image\]\[General\]/{flag=1;next} /^\[/{flag=0} flag && /^Image=/{print;exit}' "${appletsrc}" 2>/dev/null || true)"
@@ -199,6 +203,9 @@ elif [[ "${xdg}" == *GNOME* ]]; then
     capture_gnome_interface "GNOME"
     capture_gnome_session_daemon_settings "GNOME"
 
+    avatar_path="$(accountsservice_icon_file)"
+    [[ -n "${avatar_path}" ]] || warn "Could not determine GNOME user avatar via AccountsService."
+
     if command -v gsettings >/dev/null 2>&1; then
         picture_uri="$(gsettings get org.gnome.desktop.background picture-uri 2>/dev/null || true)"
         if [[ -n "${picture_uri}" ]]; then
@@ -240,6 +247,11 @@ settings_file="${backup_dir}/settings.env"
 [[ -n "${source_desktop}" ]] && printf 'SOURCE_DESKTOP=%s\n' "${source_desktop}" >> "${settings_file}"
 [[ -n "${dark_mode}" ]] && printf 'DARK_MODE=%s\n' "${dark_mode}" >> "${settings_file}"
 [[ -n "${wallpaper_path}" ]] && printf 'WALLPAPER_PATH=%q\n' "${wallpaper_path}" >> "${settings_file}"
+# Reference only: AVATAR_PATH lives under /var/lib/AccountsService, which
+# survives a rebase untouched (like /var/lib/flatpak), and GNOME/KDE both
+# already read it from the same AccountsService property — so
+# restore-config.sh has nothing to apply here. See config-map/README.md.
+[[ -n "${avatar_path}" ]] && printf 'AVATAR_PATH=%q\n' "${avatar_path}" >> "${settings_file}"
 [[ -n "${accent_color}" ]] && printf 'ACCENT_COLOR=%s\n' "${accent_color}" >> "${settings_file}"
 [[ -n "${input_layouts}" ]] && printf 'INPUT_LAYOUTS=%s\n' "${input_layouts}" >> "${settings_file}"
 [[ -n "${night_light}" ]] && printf 'NIGHT_LIGHT=%s\n' "${night_light}" >> "${settings_file}"

@@ -38,9 +38,10 @@ On an ostree-based system, only `/usr` is replaced wholesale and `/etc` is
 three-way merged on a rebase — `/home` and `/var` (which is where
 `/var/lib/flatpak` lives) are untouched. In practice this means:
 
-- Your files, shell config, SSH keys, Flatpak apps, and Flatpak per-app data
-  already survive a rebase on their own — nothing needs to be "restored" for
-  those.
+- Your files, shell config, SSH keys, Flatpak apps, Flatpak per-app data, and
+  your login/user-switcher avatar (stored via AccountsService under
+  `/var/lib/AccountsService`) already survive a rebase on their own —
+  nothing needs to be "restored" for those.
 - What does **not** carry over automatically is anything that only makes
   sense inside one desktop's own configuration system (KConfig for Plasma,
   `dconf`/`gsettings` for GNOME/Budgie, plain config files for Sway, a
