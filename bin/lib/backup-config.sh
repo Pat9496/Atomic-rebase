@@ -157,7 +157,7 @@ elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
     fi
     warn "KDE has no confirmed way to read the current accent color back from disk; not captured (set it manually after switching)."
 
-    avatar_path="$(accountsservice_icon_file)"
+    avatar_path="$(accountsservice_icon_file || true)"
     [[ -n "${avatar_path}" ]] || warn "Could not determine KDE user avatar via AccountsService."
 
     appletsrc="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
@@ -203,7 +203,7 @@ elif [[ "${xdg}" == *GNOME* ]]; then
     capture_gnome_interface "GNOME"
     capture_gnome_session_daemon_settings "GNOME"
 
-    avatar_path="$(accountsservice_icon_file)"
+    avatar_path="$(accountsservice_icon_file || true)"
     [[ -n "${avatar_path}" ]] || warn "Could not determine GNOME user avatar via AccountsService."
 
     if command -v gsettings >/dev/null 2>&1; then
