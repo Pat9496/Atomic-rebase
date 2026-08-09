@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement or a new setting to migrate
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before requesting a new migrated setting, check
+        `config-map/README.md` — some things are deliberately left as
+        manual steps because there's no reliable 1:1 equivalent, or no
+        confirmed CLI/config format, for one of the desktops involved.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: If this is a new setting to migrate, include how to read it on the source desktop and how to apply it on the target desktop, with a source for the mechanism.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

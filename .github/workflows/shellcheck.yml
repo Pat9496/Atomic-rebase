@@ -1,0 +1,25 @@
+name: ShellCheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Syntax-check scripts
+        run: |
+          set -euo pipefail
+          for f in Atomic-rebase.sh bin/lib/*.sh; do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
+
+      - name: Run ShellCheck
+        run: shellcheck Atomic-rebase.sh bin/lib/*.sh
