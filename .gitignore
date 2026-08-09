@@ -1,0 +1,13 @@
+# AI coding agent instruction files
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+AGENTS.md
+.cursorrules
+.cursor/
+.windsurfrules
+.windsurf/
+.github/copilot-instructions.md
+.aider*
+.codeium/
+.clinerules
