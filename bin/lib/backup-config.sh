@@ -10,7 +10,9 @@ require_not_root
 backup_dir="$(new_backup_dir)"
 
 if command -v dconf >/dev/null 2>&1; then
-    if ! dconf dump / > "${backup_dir}/dconf-dump.ini" 2>/dev/null; then
+    if dconf dump / > "${backup_dir}/dconf-dump.ini" 2>/dev/null; then
+        log "Captured dconf dump."
+    else
         warn "Failed to dump dconf settings."
         rm -f "${backup_dir}/dconf-dump.ini"
     fi
@@ -19,7 +21,9 @@ else
 fi
 
 if command -v flatpak >/dev/null 2>&1; then
-    if ! flatpak list --user --app --columns=application,version,branch,origin > "${backup_dir}/flatpak-user-apps.txt" 2>/dev/null; then
+    if flatpak list --user --app --columns=application,version,branch,origin > "${backup_dir}/flatpak-user-apps.txt" 2>/dev/null; then
+        log "Captured flatpak user app list."
+    else
         warn "Failed to list flatpak user apps."
         rm -f "${backup_dir}/flatpak-user-apps.txt"
     fi
@@ -28,7 +32,9 @@ else
 fi
 
 if command -v rpm-ostree >/dev/null 2>&1; then
-    if ! rpm-ostree status --json > "${backup_dir}/rpm-ostree-status.json" 2>/dev/null; then
+    if rpm-ostree status --json > "${backup_dir}/rpm-ostree-status.json" 2>/dev/null; then
+        log "Captured rpm-ostree status."
+    else
         warn "Failed to capture rpm-ostree status."
         rm -f "${backup_dir}/rpm-ostree-status.json"
     fi
@@ -68,6 +74,7 @@ capture_gnome_interface() {
         else
             dark_mode="false"
         fi
+        log "${label} dark mode: ${dark_mode}"
     else
         warn "Could not determine ${label} color-scheme."
     fi
@@ -78,6 +85,7 @@ capture_gnome_interface() {
     accent="${accent%\'}"
     if [[ -n "${accent}" ]]; then
         accent_color="${accent}"
+        log "${label} accent color: ${accent_color}"
     else
         warn "Could not determine ${label} accent-color."
     fi
@@ -103,6 +111,7 @@ capture_gnome_session_daemon_settings() {
         layouts="$(grep -oP "(?<='xkb', ')[^']*" <<<"${sources}" 2>/dev/null | cut -d'+' -f1 | paste -sd',' - || true)"
         if [[ -n "${layouts}" ]]; then
             input_layouts="${layouts}"
+            log "${label} keyboard layout(s): ${input_layouts}"
         else
             warn "Could not parse ${label} input-sources."
         fi
@@ -114,6 +123,7 @@ capture_gnome_session_daemon_settings() {
     nl_temp="$(gsettings get org.gnome.settings-daemon.plugins.color night-light-temperature 2>/dev/null || true)"
     nl_temp="${nl_temp#uint32 }"
     [[ -n "${nl_temp}" ]] && night_light_temp="${nl_temp}"
+    [[ -n "${night_light}" ]] && log "${label} night light: enabled=${night_light} temp=${night_light_temp:-unset}"
 
     local lock_enabled delay_raw
     lock_enabled="$(gsettings get org.gnome.desktop.screensaver lock-enabled 2>/dev/null || true)"
@@ -121,6 +131,7 @@ capture_gnome_session_daemon_settings() {
     delay_raw="$(gsettings get org.gnome.desktop.session idle-delay 2>/dev/null || true)"
     delay_raw="${delay_raw#uint32 }"
     [[ -n "${delay_raw}" ]] && idle_delay="${delay_raw}"
+    [[ -n "${idle_lock}" || -n "${idle_delay}" ]] && log "${label} idle lock: enabled=${idle_lock:-unset} delay=${idle_delay:-unset}s"
 
     local repeat_delay repeat_interval
     repeat_delay="$(gsettings get org.gnome.desktop.peripherals.keyboard delay 2>/dev/null || true)"
@@ -129,6 +140,7 @@ capture_gnome_session_daemon_settings() {
     repeat_interval="$(gsettings get org.gnome.desktop.peripherals.keyboard repeat-interval 2>/dev/null || true)"
     repeat_interval="${repeat_interval#uint32 }"
     [[ -n "${repeat_interval}" ]] && key_repeat_interval="${repeat_interval}"
+    [[ -n "${key_repeat_delay}" || -n "${key_repeat_interval}" ]] && log "${label} keyboard repeat: delay=${key_repeat_delay:-unset}ms interval=${key_repeat_interval:-unset}ms"
 }
 
 xdg="${XDG_CURRENT_DESKTOP:-}"
@@ -152,13 +164,18 @@ elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
         else
             dark_mode="false"
         fi
+        log "KDE dark mode: ${dark_mode} (ColorScheme=${scheme})"
     else
         warn "Could not determine KDE color scheme."
     fi
     warn "KDE has no confirmed way to read the current accent color back from disk; not captured (set it manually after switching)."
 
     avatar_path="$(accountsservice_icon_file || true)"
-    [[ -n "${avatar_path}" ]] || warn "Could not determine KDE user avatar via AccountsService."
+    if [[ -n "${avatar_path}" ]]; then
+        log "KDE avatar: ${avatar_path}"
+    else
+        warn "Could not determine KDE user avatar via AccountsService."
+    fi
 
     appletsrc="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
     if [[ -f "${appletsrc}" ]]; then
@@ -166,6 +183,7 @@ elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
         if [[ -n "${image_line}" ]]; then
             wallpaper_uri="${image_line#Image=}"
             wallpaper_path="${wallpaper_uri#file://}"
+            log "KDE wallpaper: ${wallpaper_path}"
         else
             warn "Could not find a wallpaper Image= entry in ${appletsrc}."
         fi
@@ -175,11 +193,13 @@ elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
 
     layout_list="$(kde_read_config --file kxkbrc --group Layout --key LayoutList)"
     [[ -n "${layout_list}" ]] && input_layouts="${layout_list}"
+    [[ -n "${input_layouts}" ]] && log "KDE keyboard layout(s): ${input_layouts}"
 
     nc_active="$(kde_read_config --file kwinrc --group NightColor --key Active)"
     [[ -n "${nc_active}" ]] && night_light="${nc_active}"
     nc_temp="$(kde_read_config --file kwinrc --group NightColor --key NightTemperature)"
     [[ -n "${nc_temp}" ]] && night_light_temp="${nc_temp}"
+    [[ -n "${night_light}" ]] && log "KDE night light: enabled=${night_light} temp=${night_light_temp:-unset}"
 
     lock_autolock="$(kde_read_config --file kscreenlockerrc --group Daemon --key Autolock)"
     [[ -n "${lock_autolock}" ]] && idle_lock="${lock_autolock}"
@@ -187,6 +207,7 @@ elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
     if [[ -n "${lock_timeout_min}" ]]; then
         idle_delay=$((lock_timeout_min * 60))
     fi
+    [[ -n "${idle_lock}" || -n "${idle_delay}" ]] && log "KDE idle lock: enabled=${idle_lock:-unset} delay=${idle_delay:-unset}s"
 
     repeat_delay_ms="$(kde_read_config --file kcminputrc --group Keyboard --key RepeatDelay)"
     [[ -n "${repeat_delay_ms}" ]] && key_repeat_delay="${repeat_delay_ms}"
@@ -197,6 +218,7 @@ elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
         repeat_interval_ms="$(awk -v r="${repeat_rate_cps}" 'BEGIN { if (r > 0) printf "%d", (1000 / r) + 0.5 }')"
         [[ -n "${repeat_interval_ms}" ]] && key_repeat_interval="${repeat_interval_ms}"
     fi
+    [[ -n "${key_repeat_delay}" || -n "${key_repeat_interval}" ]] && log "KDE keyboard repeat: delay=${key_repeat_delay:-unset}ms interval=${key_repeat_interval:-unset}ms"
 
 elif [[ "${xdg}" == *GNOME* ]]; then
     source_desktop="silverblue"
@@ -204,7 +226,11 @@ elif [[ "${xdg}" == *GNOME* ]]; then
     capture_gnome_session_daemon_settings "GNOME"
 
     avatar_path="$(accountsservice_icon_file || true)"
-    [[ -n "${avatar_path}" ]] || warn "Could not determine GNOME user avatar via AccountsService."
+    if [[ -n "${avatar_path}" ]]; then
+        log "GNOME avatar: ${avatar_path}"
+    else
+        warn "Could not determine GNOME user avatar via AccountsService."
+    fi
 
     if command -v gsettings >/dev/null 2>&1; then
         picture_uri="$(gsettings get org.gnome.desktop.background picture-uri 2>/dev/null || true)"
@@ -212,6 +238,7 @@ elif [[ "${xdg}" == *GNOME* ]]; then
             picture_uri="${picture_uri#\'}"
             picture_uri="${picture_uri%\'}"
             wallpaper_path="${picture_uri#file://}"
+            log "GNOME wallpaper: ${wallpaper_path}"
         else
             warn "Could not determine GNOME wallpaper picture-uri."
         fi
@@ -229,8 +256,8 @@ elif [[ "${xdg}" == *COSMIC* ]]; then
     cosmic_mode_file="${HOME}/.config/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
     if [[ -f "${cosmic_mode_file}" ]]; then
         case "$(cat "${cosmic_mode_file}" 2>/dev/null || true)" in
-            true) dark_mode="true" ;;
-            false) dark_mode="false" ;;
+            true) dark_mode="true"; log "COSMIC dark mode: ${dark_mode}" ;;
+            false) dark_mode="false"; log "COSMIC dark mode: ${dark_mode}" ;;
             *) warn "Unrecognized value in ${cosmic_mode_file}." ;;
         esac
     else
@@ -241,6 +268,8 @@ elif [[ "${xdg}" == *COSMIC* ]]; then
 else
     warn "Could not determine current desktop environment (XDG_CURRENT_DESKTOP=${xdg:-unset})."
 fi
+
+[[ -n "${source_desktop}" ]] && log "Detected desktop: ${source_desktop}"
 
 settings_file="${backup_dir}/settings.env"
 : > "${settings_file}"

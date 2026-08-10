@@ -58,6 +58,7 @@ if [[ ! -d "${from_dir}" ]]; then
     err "Backup directory not found: ${from_dir}"
     exit 1
 fi
+log "Using backup: ${from_dir}"
 
 settings_file="${from_dir}/settings.env"
 if [[ ! -f "${settings_file}" ]]; then
@@ -128,6 +129,7 @@ apply_dark_mode() {
 }
 
 if [[ -n "${DARK_MODE}" ]]; then
+    log "Applying dark/light mode (${DARK_MODE}) to ${target_desktop}..."
     if apply_dark_mode "${target_desktop}" "${DARK_MODE}"; then
         applied+=("dark/light mode")
     else
@@ -140,6 +142,7 @@ else
 fi
 
 if [[ -n "${WALLPAPER_PATH}" ]]; then
+    log "Applying wallpaper (${WALLPAPER_PATH}) to ${target_desktop}..."
     case "${target_desktop}" in
         silverblue)
             require_cmd gsettings
@@ -209,6 +212,7 @@ apply_accent_color() {
 }
 
 if [[ -n "${ACCENT_COLOR}" ]]; then
+    log "Applying accent color (${ACCENT_COLOR}) to ${target_desktop}..."
     if apply_accent_color "${target_desktop}" "${ACCENT_COLOR}"; then
         applied+=("accent color")
     else
@@ -265,6 +269,7 @@ apply_input_layouts() {
 }
 
 if [[ -n "${INPUT_LAYOUTS}" ]]; then
+    log "Applying keyboard layout(s) (${INPUT_LAYOUTS}) to ${target_desktop}..."
     if apply_input_layouts "${target_desktop}" "${INPUT_LAYOUTS}"; then
         applied+=("keyboard layout")
     else
@@ -297,6 +302,7 @@ apply_night_light() {
 }
 
 if [[ -n "${NIGHT_LIGHT}" ]]; then
+    log "Applying night light (enabled=${NIGHT_LIGHT} temp=${NIGHT_LIGHT_TEMP:-unset}) to ${target_desktop}..."
     if apply_night_light "${target_desktop}" "${NIGHT_LIGHT}" "${NIGHT_LIGHT_TEMP}"; then
         applied+=("night light")
     else
@@ -338,6 +344,7 @@ apply_idle_lock() {
 }
 
 if [[ -n "${IDLE_LOCK}" || -n "${IDLE_DELAY_SECONDS}" ]]; then
+    log "Applying idle lock (enabled=${IDLE_LOCK:-unset} delay=${IDLE_DELAY_SECONDS:-unset}s) to ${target_desktop}..."
     if apply_idle_lock "${target_desktop}" "${IDLE_LOCK}" "${IDLE_DELAY_SECONDS}"; then
         applied+=("idle timeout/screen lock")
     else
@@ -377,6 +384,7 @@ apply_keyboard_repeat() {
 }
 
 if [[ -n "${KEY_REPEAT_DELAY_MS}" || -n "${KEY_REPEAT_INTERVAL_MS}" ]]; then
+    log "Applying keyboard repeat (delay=${KEY_REPEAT_DELAY_MS:-unset}ms interval=${KEY_REPEAT_INTERVAL_MS:-unset}ms) to ${target_desktop}..."
     if apply_keyboard_repeat "${target_desktop}" "${KEY_REPEAT_DELAY_MS}" "${KEY_REPEAT_INTERVAL_MS}"; then
         applied+=("keyboard repeat rate")
     else
@@ -399,7 +407,8 @@ fi
 is_known_safe_layered_package() {
     local pkg="$1" known
     [[ "${pkg}" == "git" || "${pkg}" == git-* ]] && return 0
-    for known in alacritty btop chezmoi fastfetch gh htop neovim tmux; do
+    for known in alacritty btop chezmoi cmatrix distrobox fastfetch gh htop neovim \
+        podman-compose rpmdevtools tmux vim-enhanced xclip xdotool xsel; do
         [[ "${pkg}" == "${known}" ]] && return 0
     done
     return 1

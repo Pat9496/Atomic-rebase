@@ -62,6 +62,15 @@ isn't migrated, and how confident each mechanism is per desktop.
   `rpm-ostree` and `sudo` available (present by default on all of them).
   `jq` is used if present for more reliable image-reference detection, but
   isn't required.
+- Your install must be deployed **container-native** (from a
+  `quay.io/fedora/...`-style container image), not from the classic ostree
+  `fedora:fedora/...` remote that ships by default on install media — these
+  scripts identify the current/target desktop from the container image
+  reference and can't compute a rebase target from a plain ostree ref. Check
+  with `rpm-ostree status`; if you're on the ostree remote, first rebase to
+  your current desktop's container image (e.g.
+  `sudo rpm-ostree rebase ostree-remote-registry:fedora:quay.io/fedora/fedora-silverblue:<version>`)
+  before using `Atomic-rebase.sh`.
 - Run as your normal user, not root — the scripts elevate with `sudo`
   internally only for the `rpm-ostree rebase` step itself, and for
   `restore-config.sh`'s optional re-layering of known-safe packages (see
@@ -110,11 +119,16 @@ bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic>
 This re-applies the settings captured in step 2 that have a known
 equivalent in the new desktop. It also offers to re-layer any ostree-layered
 RPM packages (`rpm-ostree install`) from a small allowlist of common,
-desktop-agnostic CLI tools (alacritty, btop, chezmoi, fastfetch, gh, htop,
-neovim, tmux, and any `git`/`git-*` package) that were layered on the old
-desktop — confirm once (or pass `-y`/`--yes` to skip the prompt) and it
-re-layers them via `sudo`, taking effect on next reboot. Anything else
-layered is left for you to reinstall manually. It writes a `MANUAL-STEPS.txt`
+desktop-agnostic CLI tools (alacritty, btop, chezmoi, cmatrix, distrobox,
+fastfetch, gh, htop, neovim, podman-compose, rpmdevtools, tmux,
+vim-enhanced, xclip, xdotool, xsel, and any `git`/`git-*` package) that were
+layered on the old desktop — confirm once (or pass `-y`/`--yes` to skip the
+prompt) and it re-layers them via `sudo`, taking effect on next reboot.
+Anything else layered — including hardware-specific drivers/akmods
+(e.g. `xorg-x11-drv-nvidia`, `akmod-nvidia`) and the virtualization stack
+(`libvirt`, `qemu-kvm`, `virt-install`, `swtpm`, `edk2-ovmf`), which are
+kernel-version- or hardware-coupled and too consequential to reinstall
+unattended — is left for you to reinstall manually. It writes a `MANUAL-STEPS.txt`
 next to the backup listing what was and wasn't migrated this run (panel/dock
 layout, keyboard shortcuts, default app associations, desktop
 extensions/widgets, and similar desktop-specific setup are always manual —
