@@ -68,7 +68,7 @@ log "Target image:    ${target_ref}"
 warn "Rebasing between Fedora Atomic Desktop variants is not an officially supported workflow; see README.md."
 
 if [[ "${DESKTOP_OFFICIAL[$TARGET]}" != "1" ]]; then
-    warn "${TARGET} is a community-maintained image (quay.io/fedora-ostree-desktops), not signed by Fedora's official 'fedora' ostree remote. It will be pulled unverified."
+    warn "${TARGET} is published under a separate registry namespace (quay.io/fedora-ostree-desktops) that isn't covered by the pre-configured signed 'fedora' ostree remote. It will be pulled unverified."
 fi
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then

@@ -9,22 +9,23 @@ possible.
 
 | Desktop | Name passed to `--to` | Image | Trust |
 |---|---|---|---|
-| GNOME | `silverblue` | `quay.io/fedora/fedora-silverblue` | Official, signed via the pre-configured `fedora` ostree remote |
-| KDE Plasma | `kinoite` | `quay.io/fedora/fedora-kinoite` | Official, signed via the pre-configured `fedora` ostree remote |
-| Budgie | `budgie` | `quay.io/fedora-ostree-desktops/budgie-atomic` | Community-maintained, pulled unverified |
-| Sway | `sway` | `quay.io/fedora-ostree-desktops/sway-atomic` | Community-maintained, pulled unverified |
-| COSMIC | `cosmic` | `quay.io/fedora-ostree-desktops/cosmic-atomic` | Community-maintained, pulled unverified |
+| GNOME | `silverblue` | `quay.io/fedora/fedora-silverblue` | Covered by the pre-configured signed `fedora` ostree remote |
+| KDE Plasma | `kinoite` | `quay.io/fedora/fedora-kinoite` | Covered by the pre-configured signed `fedora` ostree remote |
+| Budgie | `budgie` | `quay.io/fedora-ostree-desktops/budgie-atomic` | Not covered by the `fedora` remote, pulled unverified |
+| Sway | `sway` | `quay.io/fedora-ostree-desktops/sway-atomic` | Not covered by the `fedora` remote, pulled unverified |
+| COSMIC | `cosmic` | `quay.io/fedora-ostree-desktops/cosmic-atomic` | Not covered by the `fedora` remote, pulled unverified |
 
 Any of the five can be rebased to any other.
 
 ## Why this exists
 
 Fedora ships each Atomic Desktop as its own separate container image,
-swapped via `rpm-ostree rebase`. Silverblue and Kinoite are official Fedora
-images. Sway Atomic (formerly Sericea), Budgie Atomic (formerly Onyx), and
-COSMIC Atomic are maintained by their respective SIGs and published to a
-separate, community-run registry that isn't backed by the same signed
-`fedora` ostree remote — `rpm-ostree` pulls those unverified.
+swapped via `rpm-ostree rebase`. Silverblue and Kinoite are pulled through the
+signed `fedora` ostree remote that's pre-configured on every Atomic Desktop
+install. Sway Atomic (formerly Sericea), Budgie Atomic (formerly Onyx), and
+COSMIC Atomic are maintained by their respective SIGs and published under a
+separate registry namespace that isn't covered by that same pre-configured
+remote — `rpm-ostree` pulls those unverified.
 
 > [!WARNING]
 > Rebasing between Fedora Atomic Desktop variants is not an officially
@@ -62,6 +63,10 @@ isn't migrated, and how confident each mechanism is per desktop.
   `rpm-ostree` and `sudo` available (present by default on all of them).
   `jq` is used if present for more reliable image-reference detection, but
   isn't required.
+- Rebasing to Budgie, Sway, or COSMIC additionally requires `curl` and `jq`
+  (both required, not just `jq` if present): since those images have no
+  `:latest` tag, the script queries the quay.io API at rebase time to find
+  their current latest stable tag.
 - Your install must be deployed **container-native** (from a
   `quay.io/fedora/...`-style container image), not from the classic ostree
   `fedora:fedora/...` remote that ships by default on install media — these
@@ -84,7 +89,8 @@ isn't migrated, and how confident each mechanism is per desktop.
 ```
 
 This detects your current desktop from the booted image, computes the
-target image (keeping your current device/version tag), and walks you
+target image (always the latest stable release of the destination desktop,
+regardless of what tag/digest the current image is on), and walks you
 through the rest. Useful flags:
 
 - `--dry-run` — print what would happen without changing anything.
@@ -100,8 +106,8 @@ through the rest. Useful flags:
 
 The script:
 
-1. Detects your current image and desktop (the Fedora version/tag is
-   preserved — only the desktop-environment image changes).
+1. Detects your current image and desktop, and computes the target as the
+   destination desktop's own latest stable release.
 2. Runs `bin/lib/backup-config.sh` to snapshot current settings under
    `~/.local/share/atomic-rebase/backups/<timestamp>/`.
 3. Prints the exact target image and warns if it's a community-maintained,

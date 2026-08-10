@@ -132,30 +132,67 @@ desktop_from_image_ref() {
             return 0
         fi
     done
-    err "Image reference does not match any known Fedora Atomic Desktop image: ${ref}"
-    return 1
-}
 
-# Returns the ":<tag>" or "@sha256:<digest>" suffix that follows the matched
-# registry path in ref, so compute_target_image_ref can carry the same
-# Fedora release/pin across to the target image.
-_image_ref_suffix() {
-    local ref="$1" name path
+    # Classic (non-container) ostree refspec, e.g. "fedora:fedora/43/x86_64/kinoite"
+    # — the format installs have before they've been rebased to the OCI
+    # container image. Only Silverblue/Kinoite ship this way via the "fedora"
+    # remote; Budgie/Sway/COSMIC only exist as container images.
     for name in "${!DESKTOP_IMAGE[@]}"; do
-        path="${DESKTOP_IMAGE[$name]}"
-        if [[ "${ref}" == *"${path}"* ]]; then
-            printf '%s\n' "${ref#*"${path}"}"
+        if [[ "${DESKTOP_OFFICIAL[$name]}" == "1" && "${ref}" == fedora:fedora/*/*/"${name}" ]]; then
+            printf '%s\n' "${name}"
             return 0
         fi
     done
+
     err "Image reference does not match any known Fedora Atomic Desktop image: ${ref}"
     return 1
 }
 
-# Builds the image reference to rebase to: same tag/digest as current_ref,
-# but the target desktop's own image path, using the canonical transport for
-# its trust level (ostree-remote-registry:fedora: for the officially signed
-# images, ostree-unverified-registry: for the community-maintained ones).
+# Queries the quay.io API for the most recent stable major-version tag of a
+# Fedora Atomic Desktop image (e.g. "44"). Unlike Silverblue/Kinoite (see
+# compute_target_image_ref below), Budgie/Sway/COSMIC Atomic have no ":latest"
+# tag: their major-version tags (e.g. "43", "44", "45") get re-pushed on every
+# new build, and whichever numeric tag is currently also tagged "rawhide"
+# hasn't stabilized yet. That one is excluded; the next-highest is returned.
+latest_stable_tag_for_image() {
+    local image_path="$1" repo_path tags_json rawhide_digest tag
+
+    require_cmd curl
+    require_cmd jq
+
+    repo_path="${image_path#quay.io/}"
+
+    tags_json="$(curl -fsSL "https://quay.io/api/v1/repository/${repo_path}/tag/?onlyActiveTags=true&limit=100" 2>/dev/null)" || {
+        err "Failed to query quay.io for tags of ${image_path}."
+        return 1
+    }
+
+    rawhide_digest="$(jq -r '[.tags[] | select(.name=="rawhide")][0].manifest_digest // empty' <<<"${tags_json}" 2>/dev/null)"
+
+    tag="$(jq -r --arg rh "${rawhide_digest}" '
+        [.tags[] | select(.name | test("^[0-9]+$"))
+                 | select($rh == "" or .manifest_digest != $rh)
+                 | (.name | tonumber)]
+        | max // empty
+    ' <<<"${tags_json}" 2>/dev/null)"
+
+    if [[ -z "${tag}" || "${tag}" == "null" ]]; then
+        err "Could not determine the most recent stable version tag for ${image_path} from quay.io."
+        return 1
+    fi
+    printf '%s\n' "${tag}"
+}
+
+# Builds the image reference to rebase to: always the target desktop's own
+# latest stable release, never whatever tag/digest current_ref happens to be
+# on. Silverblue/Kinoite keep ":latest" pointed at the current stable release,
+# so that tag is used directly. Budgie/Sway/COSMIC have no ":latest" tag —
+# their numeric major-version tags get re-pushed on every build, so
+# latest_stable_tag_for_image queries quay.io to find the highest one that
+# isn't still tracking "rawhide". Also picks the canonical transport for the
+# target's trust level (ostree-remote-registry:fedora: for the images signed
+# via the pre-configured "fedora" ostree remote, ostree-unverified-registry:
+# for the rest).
 compute_target_image_ref() {
     local current_ref="$1" target="$2"
 
@@ -171,17 +208,12 @@ compute_target_image_ref() {
         return 1
     fi
 
-    local suffix
-    suffix="$(_image_ref_suffix "${current_ref}")" || return 1
-    if [[ -z "${suffix}" || ( "${suffix:0:1}" != ":" && "${suffix:0:1}" != "@" ) ]]; then
-        err "Unrecognized image reference (no tag or digest): ${current_ref}"
-        return 1
-    fi
-
     if [[ "${DESKTOP_OFFICIAL[$target]}" == "1" ]]; then
-        printf 'ostree-remote-registry:fedora:%s%s\n' "${DESKTOP_IMAGE[$target]}" "${suffix}"
+        printf 'ostree-remote-registry:fedora:%s:latest\n' "${DESKTOP_IMAGE[$target]}"
     else
-        printf 'ostree-unverified-registry:%s%s\n' "${DESKTOP_IMAGE[$target]}" "${suffix}"
+        local tag
+        tag="$(latest_stable_tag_for_image "${DESKTOP_IMAGE[$target]}")" || return 1
+        printf 'ostree-unverified-registry:%s:%s\n' "${DESKTOP_IMAGE[$target]}" "${tag}"
     fi
 }
 
