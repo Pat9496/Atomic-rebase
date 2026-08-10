@@ -63,8 +63,10 @@ isn't migrated, and how confident each mechanism is per desktop.
   `jq` is used if present for more reliable image-reference detection, but
   isn't required.
 - Run as your normal user, not root — the scripts elevate with `sudo`
-  internally only for the `rpm-ostree rebase` step itself, since the
-  dconf/gsettings/flatpak inspection needs to run in your own user session.
+  internally only for the `rpm-ostree rebase` step itself, and for
+  `restore-config.sh`'s optional re-layering of known-safe packages (see
+  below), since the dconf/gsettings/flatpak inspection needs to run in your
+  own user session.
 
 ## Usage
 
@@ -106,11 +108,17 @@ bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic>
 ```
 
 This re-applies the settings captured in step 2 that have a known
-equivalent in the new desktop, and writes a `MANUAL-STEPS.txt` next to the
-backup listing what was and wasn't migrated this run (panel/dock layout,
-keyboard shortcuts, default app associations, desktop extensions/widgets,
-and similar desktop-specific setup are always manual — see
-[`config-map/README.md`](config-map/README.md)).
+equivalent in the new desktop. It also offers to re-layer any ostree-layered
+RPM packages (`rpm-ostree install`) from a small allowlist of common,
+desktop-agnostic CLI tools (alacritty, btop, chezmoi, fastfetch, gh, htop,
+neovim, tmux, and any `git`/`git-*` package) that were layered on the old
+desktop — confirm once (or pass `-y`/`--yes` to skip the prompt) and it
+re-layers them via `sudo`, taking effect on next reboot. Anything else
+layered is left for you to reinstall manually. It writes a `MANUAL-STEPS.txt`
+next to the backup listing what was and wasn't migrated this run (panel/dock
+layout, keyboard shortcuts, default app associations, desktop
+extensions/widgets, and similar desktop-specific setup are always manual —
+see [`config-map/README.md`](config-map/README.md)).
 
 ## Rolling back
 

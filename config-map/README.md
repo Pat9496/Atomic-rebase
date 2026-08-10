@@ -43,6 +43,31 @@ what it applied vs. skipped for each run in `MANUAL-STEPS.txt`.
 |--------------|----------------------------------------------------------------------------------------------------------------|------------------------------|
 | User avatar (login/user-switcher icon) | `org.freedesktop.Accounts` (AccountsService) on the system bus, read via `busctl` for Silverblue (GNOME) and Kinoite (KDE Plasma) — `FindUserByName` then the `IconFile` property | Stored under `/var/lib/AccountsService`, which — like `/var/lib/flatpak` — is untouched by an ostree rebase, and GNOME's and KDE Plasma's avatar UIs already read/write that same shared property. There's no per-desktop format to translate the way there is for dark mode/wallpaper, so `backup-config.sh` records `AVATAR_PATH` in `settings.env` purely for reference and `restore-config.sh` never acts on it. Not attempted for Budgie/Sway/Cosmic — unconfirmed whether their user-management tooling (if any) reads the same AccountsService property. |
 
+## Ostree-layered RPM packages (partially automatic)
+
+Layered packages (`rpm-ostree install <package>`) live in `/usr`, which a
+rebase replaces (not merges) with the target image, so unlike Flatpaks —
+which live on `/var` and persist automatically — they don't survive a
+switch to a different base image on their own.
+
+`restore-config.sh` reads whatever packages were layered at backup time from
+`rpm-ostree-status.json` (`requested-packages`, via `jq`) and splits them:
+
+- **Known-safe packages** — a small curated allowlist of desktop-agnostic
+  CLI tools with no GUI/desktop-specific integration (`alacritty`, `btop`,
+  `chezmoi`, `fastfetch`, `gh`, `htop`, `neovim`, `tmux`, plus any `git` or
+  `git-*` package such as `git-lfs`) — are offered back with a single
+  `confirm` prompt (`-y`/`--yes`/`ASSUME_YES` to skip it) and, if accepted,
+  re-layered with `sudo rpm-ostree install --idempotent -y <packages>`. Like
+  the rebase itself, this takes effect on the next reboot.
+- **Everything else** (e.g. GUI apps, desktop-specific packages, or the
+  allowlist declined at the prompt) is left for the user, listed by name in
+  `MANUAL-STEPS.txt` for reinstalling manually with
+  `rpm-ostree install <package>`.
+
+If `jq` isn't available, or `rpm-ostree-status.json` is missing from the
+backup, `MANUAL-STEPS.txt` says so instead of silently reinstalling nothing.
+
 ## Not migrated (set manually after switching)
 
 These have no reliable 1:1 equivalent, or depend on desktop-specific

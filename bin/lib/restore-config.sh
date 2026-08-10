@@ -8,12 +8,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 require_not_root
 
 usage() {
-    printf 'Usage: %s --to <%s> [--from <backup-dir>]\n' \
+    printf 'Usage: %s --to <%s> [--from <backup-dir>] [-y|--yes]\n' \
         "$(basename "${BASH_SOURCE[0]}")" "$(known_desktops | paste -sd'|')" >&2
 }
 
 target_desktop=""
 from_dir=""
+ASSUME_YES="${ASSUME_YES:-0}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -26,6 +27,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { err "--from requires an argument."; exit 1; }
             from_dir="$2"
             shift 2
+            ;;
+        -y|--yes)
+            ASSUME_YES=1
+            shift
             ;;
         -h|--help)
             usage
@@ -383,6 +388,82 @@ else
     skipped+=("keyboard repeat rate")
 fi
 
+# Curated allowlist of common, desktop-agnostic CLI tools (no GUI or
+# desktop-specific integration) that are safe to automatically re-layer via
+# `rpm-ostree install` on restore. Nothing here is ever installed that wasn't
+# already layered on the source desktop — this only recognizes which of the
+# packages actually found in rpm-ostree-status.json are common enough to
+# reapply without asking the user to type the package name back in manually.
+# Git tooling is matched by prefix rather than listed exhaustively, since
+# "git-lfs", "git-delta", etc. are all equally unambiguous re-layers.
+is_known_safe_layered_package() {
+    local pkg="$1" known
+    [[ "${pkg}" == "git" || "${pkg}" == git-* ]] && return 0
+    for known in alacritty btop chezmoi fastfetch gh htop neovim tmux; do
+        [[ "${pkg}" == "${known}" ]] && return 0
+    done
+    return 1
+}
+
+join_comma() {
+    local sep="" item result=""
+    for item in "$@"; do
+        result="${result}${sep}${item}"
+        sep=", "
+    done
+    printf '%s' "${result}"
+}
+
+# Ostree-layered RPM packages live in /usr, which a rebase replaces (unlike
+# /var, where Flatpaks live and survive untouched) — so they never carry over
+# to the new base image on their own. rpm-ostree-status.json is whatever
+# backup-config.sh captured, so this reads the *source* desktop's layered
+# packages, not the target's.
+layered_packages_known=0
+layered_package_list=()
+rpm_ostree_status_file="${from_dir}/rpm-ostree-status.json"
+if [[ -f "${rpm_ostree_status_file}" ]] && command -v jq >/dev/null 2>&1; then
+    layered_packages_known=1
+    while IFS= read -r pkg; do
+        [[ -n "${pkg}" ]] && layered_package_list+=("${pkg}")
+    done < <(jq -r '.deployments[] | select(.booted==true) | ."requested-packages"[]?' "${rpm_ostree_status_file}" 2>/dev/null || true)
+fi
+
+safe_layered_packages=()
+other_layered_packages=()
+for pkg in "${layered_package_list[@]}"; do
+    if is_known_safe_layered_package "${pkg}"; then
+        safe_layered_packages+=("${pkg}")
+    else
+        other_layered_packages+=("${pkg}")
+    fi
+done
+
+reinstalled_packages=()
+if ((${#safe_layered_packages[@]})); then
+    safe_str="$(join_comma "${safe_layered_packages[@]}")"
+    if command -v rpm-ostree >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+        if confirm "Re-layer known packages onto ${target_desktop} via rpm-ostree install (${safe_str})?"; then
+            if sudo rpm-ostree install --idempotent -y "${safe_layered_packages[@]}"; then
+                reinstalled_packages=("${safe_layered_packages[@]}")
+                applied+=("layered packages (reboot required)")
+            else
+                warn "rpm-ostree install failed for one or more known layered packages (${safe_str}); reinstall them manually."
+                other_layered_packages+=("${safe_layered_packages[@]}")
+                skipped+=("layered packages")
+            fi
+        else
+            log "Skipped re-layering known packages."
+            other_layered_packages+=("${safe_layered_packages[@]}")
+            skipped+=("layered packages")
+        fi
+    else
+        warn "rpm-ostree or sudo not found; skipping automatic re-layering of known packages (${safe_str})."
+        other_layered_packages+=("${safe_layered_packages[@]}")
+        skipped+=("layered packages")
+    fi
+fi
+
 applied_str="none"
 if ((${#applied[@]})); then
     applied_str="$(IFS=', '; printf '%s' "${applied[*]}")"
@@ -397,6 +478,18 @@ manual_steps_file="${from_dir}/MANUAL-STEPS.txt"
     printf 'Rebase: %s -> %s\n\n' "${SOURCE_DESKTOP:-unknown}" "${target_desktop}"
     printf 'Automatically applied this run: %s\n' "${applied_str}"
     printf 'Not applied this run (see warnings above for why): %s\n\n' "${skipped_str}"
+    if ((${#reinstalled_packages[@]})); then
+        printf -- '- Ostree-layered RPM packages: re-layered automatically this run via rpm-ostree install: %s. Like the rebase itself, this takes effect on next reboot.\n' "$(join_comma "${reinstalled_packages[@]}")"
+    fi
+    if ((${#other_layered_packages[@]})); then
+        printf -- '- Ostree-layered RPM packages not reinstalled automatically: %s. Rebasing replaces /usr, so these are gone after switching to a different base image (unlike Flatpaks, which live on /var and persist automatically). Reinstall what you still need with rpm-ostree install <package>.\n' "$(join_comma "${other_layered_packages[@]}")"
+    fi
+    if ! ((layered_packages_known)); then
+        printf -- '- Ostree-layered RPM packages: could not determine what was layered at backup time (jq not available, or rpm-ostree-status.json missing from this backup); check rpm-ostree status output from before the rebase. Rebasing replaces /usr, so anything layered is gone after switching to a different base image (Flatpaks are unaffected).\n'
+    elif ((${#layered_package_list[@]} == 0)); then
+        printf -- '- Ostree-layered RPM packages: none were recorded at backup time.\n'
+    fi
+    printf '\n'
     printf 'Always manual, regardless of source/target (no reliable cross-desktop equivalent):\n\n'
     printf -- '- Panel/dock/taskbar layout, widgets, and system tray configuration\n'
     printf -- '- Global and per-application keyboard shortcuts\n'
