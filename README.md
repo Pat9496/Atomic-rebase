@@ -1,9 +1,25 @@
 # Atomic-rebase
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Shell: Bash](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnubash&logoColor=white)](Atomic-rebase.sh)
+[![ShellCheck](https://github.com/Pat9496/Atomic-rebase/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/Pat9496/Atomic-rebase/actions/workflows/shellcheck.yml)
+
 Helper scripts to switch a [Fedora Atomic Desktop](https://fedoraproject.org/atomic-desktops/)
 installation between its different desktop-environment images, while keeping
 as much of the existing user configuration intact as is realistically
 possible.
+
+## Table of Contents
+
+- [Supported desktops](#supported-desktops)
+- [Why this exists](#why-this-exists)
+- [What actually happens on a rebase](#what-actually-happens-on-a-rebase)
+- [Requirements](#requirements)
+- [Usage](#usage)
+- [Rolling back](#rolling-back)
+- [Contributing](#contributing)
+- [Credits](#credits)
+- [License](#license)
 
 ## Supported desktops
 
