@@ -66,26 +66,34 @@ latest_backup_dir() {
 }
 
 # Fedora Atomic Desktop image catalog: desktop name -> registry/path/image-name
-# (no tag). Silverblue and Kinoite are official Fedora images, verified and
-# pulled through the "fedora" ostree remote pre-configured on every Atomic
-# Desktop install. Budgie/Sway/Cosmic Atomic are community-maintained images
-# published under a separate quay.io organization with no equivalent signed
-# remote configured out of the box, so they are always pulled unverified. See
-# DESKTOP_OFFICIAL below and README.md.
+# (no tag). DESKTOP_TRANSPORT is the single source of truth for the target
+# transport/trust policy.
 declare -gA DESKTOP_IMAGE=(
     [silverblue]="quay.io/fedora/fedora-silverblue"
     [kinoite]="quay.io/fedora/fedora-kinoite"
     [budgie]="quay.io/fedora-ostree-desktops/budgie-atomic"
     [sway]="quay.io/fedora-ostree-desktops/sway-atomic"
     [cosmic]="quay.io/fedora-ostree-desktops/cosmic-atomic"
+    # https://github.com/ublue-os/bluefin/blob/main/.github/workflows/build-image-stable.yml
+    [bluefin]="ghcr.io/ublue-os/bluefin"
+    # https://github.com/ublue-os/aurora/blob/main/.github/workflows/build-image-stable.yml
+    [aurora]="ghcr.io/ublue-os/aurora"
+    # https://docs.bazzite.gg/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/rebase_guide/
+    [bazzite]="ghcr.io/ublue-os/bazzite"
+    # https://docs.bazzite.gg/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/rebase_guide/
+    [bazzite-gnome]="ghcr.io/ublue-os/bazzite-gnome"
 )
 
-declare -gA DESKTOP_OFFICIAL=(
-    [silverblue]=1
-    [kinoite]=1
-    [budgie]=0
-    [sway]=0
-    [cosmic]=0
+declare -gA DESKTOP_TRANSPORT=(
+    [silverblue]="fedora-remote"
+    [kinoite]="fedora-remote"
+    [budgie]="quay-unverified"
+    [sway]="quay-unverified"
+    [cosmic]="quay-unverified"
+    [bluefin]="ublue-signed"
+    [aurora]="ublue-signed"
+    [bazzite]="ublue-signed"
+    [bazzite-gnome]="ublue-signed"
 )
 
 known_desktops() {
@@ -127,7 +135,7 @@ desktop_from_image_ref() {
     local ref="$1" name path
     for name in "${!DESKTOP_IMAGE[@]}"; do
         path="${DESKTOP_IMAGE[$name]}"
-        if [[ "${ref}" == *"${path}"* ]]; then
+        if [[ "${ref}" == *"${path}:"* || "${ref}" == *"${path}@"* || "${ref}" == *"${path}" ]]; then
             printf '%s\n' "${name}"
             return 0
         fi
@@ -138,7 +146,7 @@ desktop_from_image_ref() {
     # container image. Only Silverblue/Kinoite ship this way via the "fedora"
     # remote; Budgie/Sway/COSMIC only exist as container images.
     for name in "${!DESKTOP_IMAGE[@]}"; do
-        if [[ "${DESKTOP_OFFICIAL[$name]}" == "1" && "${ref}" == fedora:fedora/*/*/"${name}" ]]; then
+        if [[ "${DESKTOP_TRANSPORT[$name]}" == "fedora-remote" && "${ref}" == fedora:fedora/*/*/"${name}" ]]; then
             printf '%s\n' "${name}"
             return 0
         fi
@@ -146,6 +154,20 @@ desktop_from_image_ref() {
 
     err "Image reference does not match any known Fedora Atomic Desktop image: ${ref}"
     return 1
+}
+
+is_signed_ublue_ref() {
+    local ref="$1" desktop="${2:-}"
+    [[ -n "${desktop}" && "${DESKTOP_TRANSPORT[$desktop]:-}" == "ublue-signed" ]] || return 1
+    [[ "${ref}" == "ostree-image-signed:docker://${DESKTOP_IMAGE[$desktop]}:"* ||
+        "${ref}" == "ostree-image-signed:docker://${DESKTOP_IMAGE[$desktop]}@"* ]]
+}
+
+is_ublue_unverified_ref() {
+    local ref="$1" desktop="${2:-}"
+    [[ -n "${desktop}" && "${DESKTOP_TRANSPORT[$desktop]:-}" == "ublue-signed" ]] || return 1
+    [[ "${ref}" == "ostree-unverified-registry:${DESKTOP_IMAGE[$desktop]}:"* ||
+        "${ref}" == "ostree-unverified-registry:${DESKTOP_IMAGE[$desktop]}@"* ]]
 }
 
 # Queries the quay.io API for the most recent stable major-version tag of a
@@ -190,9 +212,9 @@ latest_stable_tag_for_image() {
 # their numeric major-version tags get re-pushed on every build, so
 # latest_stable_tag_for_image queries quay.io to find the highest one that
 # isn't still tracking "rawhide". Also picks the canonical transport for the
-# target's trust level (ostree-remote-registry:fedora: for the images signed
-# via the pre-configured "fedora" ostree remote, ostree-unverified-registry:
-# for the rest).
+# target's trust level: ostree-remote-registry:fedora: for images signed via
+# the pre-configured "fedora" ostree remote, ostree-unverified-registry: for
+# Quay images, or Universal Blue's bootstrap-then-signed transport flow.
 compute_target_image_ref() {
     local current_ref="$1" target="$2"
 
@@ -203,18 +225,36 @@ compute_target_image_ref() {
 
     local current
     current="$(desktop_from_image_ref "${current_ref}")" || return 1
-    if [[ "${current}" == "${target}" ]]; then
-        err "Current image is already ${target}."
+    if is_ublue_unverified_ref "${current_ref}" "${current}" && [[ "${current}" != "${target}" ]]; then
+        err "Universal Blue bootstrap for ${current} is incomplete. Reboot into it and rerun with --to ${current} to enter the signed image; use rpm-ostree rollback to abandon it."
         return 1
     fi
-
-    if [[ "${DESKTOP_OFFICIAL[$target]}" == "1" ]]; then
-        printf 'ostree-remote-registry:fedora:%s:latest\n' "${DESKTOP_IMAGE[$target]}"
-    else
-        local tag
-        tag="$(latest_stable_tag_for_image "${DESKTOP_IMAGE[$target]}")" || return 1
-        printf 'ostree-unverified-registry:%s:%s\n' "${DESKTOP_IMAGE[$target]}" "${tag}"
+    if [[ "${current}" == "${target}" ]]; then
+        if [[ "${DESKTOP_TRANSPORT[$target]}" != "ublue-signed" ]] ||
+            ! is_ublue_unverified_ref "${current_ref}" "${target}"; then
+            err "Current image is already ${target}; refusing to rebase to the same target."
+            return 1
+        fi
     fi
+
+    case "${DESKTOP_TRANSPORT[$target]}" in
+        fedora-remote)
+            printf 'ostree-remote-registry:fedora:%s:latest\n' "${DESKTOP_IMAGE[$target]}"
+            ;;
+        quay-unverified)
+            local tag
+            tag="$(latest_stable_tag_for_image "${DESKTOP_IMAGE[$target]}")" || return 1
+            printf 'ostree-unverified-registry:%s:%s\n' "${DESKTOP_IMAGE[$target]}" "${tag}"
+            ;;
+        ublue-signed)
+            if is_signed_ublue_ref "${current_ref}" "${current}" ||
+                [[ "${current}" == "${target}" ]]; then
+                printf 'ostree-image-signed:docker://%s:stable\n' "${DESKTOP_IMAGE[$target]}"
+            else
+                printf 'ostree-unverified-registry:%s:stable\n' "${DESKTOP_IMAGE[$target]}"
+            fi
+            ;;
+    esac
 }
 
 # Determines which Fedora Atomic Desktop is currently booted, from the

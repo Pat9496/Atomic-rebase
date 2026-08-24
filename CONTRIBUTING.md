@@ -31,12 +31,13 @@ a real Fedora Atomic Desktop system before opening a pull request.
 
 ## Adding a new desktop
 
-The image catalog is centralized in `bin/lib/common.sh`
-(`DESKTOP_IMAGE`/`DESKTOP_OFFICIAL`) — that's the only place a new desktop's
-image reference needs to be registered for rebasing to work. Don't add a
-new image name or registry path without a source you'd cite in the pull
-request description (a Fedora Magazine post, the SIG's own docs, etc.) —
-these commands run `sudo rpm-ostree rebase` against real systems.
+The image catalog and target transport policy are centralized in
+`bin/lib/common.sh` (`DESKTOP_IMAGE`/`DESKTOP_TRANSPORT`). Add the source URL
+as a comment next to every new image reference: these commands run
+`sudo rpm-ostree rebase` against real systems. Select the applicable explicit
+policy rather than adding a boolean: `fedora-remote` for targets covered by
+the configured Fedora remote, `quay-unverified` for Quay's numeric-tag flow,
+or `ublue-signed` for Universal Blue's bootstrap-then-signed flow.
 
 If the new desktop has a settings-migration mechanism worth adding, extend
 `apply_dark_mode`/the wallpaper `case` in `bin/lib/restore-config.sh` and

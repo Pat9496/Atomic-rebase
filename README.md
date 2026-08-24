@@ -33,8 +33,14 @@ possible.
 | Budgie | `budgie` | `quay.io/fedora-ostree-desktops/budgie-atomic` | Not covered by the `fedora` remote, pulled unverified |
 | Sway | `sway` | `quay.io/fedora-ostree-desktops/sway-atomic` | Not covered by the `fedora` remote, pulled unverified |
 | COSMIC | `cosmic` | `quay.io/fedora-ostree-desktops/cosmic-atomic` | Not covered by the `fedora` remote, pulled unverified |
+| Bluefin (GNOME) | `bluefin` | [`ghcr.io/ublue-os/bluefin:stable`](https://github.com/ublue-os/bluefin/blob/main/.github/workflows/build-image-stable.yml) | [Universal Blue cosign-signed image](#universal-blue-two-stage-entry) after initial entry |
+| Aurora (KDE Plasma) | `aurora` | [`ghcr.io/ublue-os/aurora:stable`](https://github.com/ublue-os/aurora/blob/main/.github/workflows/build-image-stable.yml) | [Universal Blue cosign-signed image](#universal-blue-two-stage-entry) after initial entry |
+| Bazzite (KDE gaming desktop) | `bazzite` | [`ghcr.io/ublue-os/bazzite:stable`](https://docs.bazzite.gg/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/rebase_guide/) | [Universal Blue cosign-signed image](#universal-blue-two-stage-entry) after initial entry |
+| Bazzite GNOME (GNOME gaming desktop) | `bazzite-gnome` | [`ghcr.io/ublue-os/bazzite-gnome:stable`](https://docs.bazzite.gg/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/rebase_guide/) | [Universal Blue cosign-signed image](#universal-blue-two-stage-entry) after initial entry |
 
-Any of the five can be rebased to any other.
+Any of these targets can be rebased to any other. This scoped support covers
+only the stable desktop images above; it does not select Universal Blue DX,
+Nvidia, Deck, uCore, or alternate-channel variants.
 
 ## Why this exists
 
@@ -47,10 +53,10 @@ separate registry namespace that isn't covered by that same pre-configured
 remote — `rpm-ostree` pulls those unverified.
 
 > [!WARNING]
-> Rebasing between Fedora Atomic Desktop variants is not an officially
-> documented/supported workflow, and rebasing to a Sway/Budgie/COSMIC Atomic
-> image means trusting an unverified, community-maintained image. Use at
-> your own risk, on a system you can afford to reinstall or roll back.
+> Cross-image rebasing is not an officially documented/supported workflow.
+> Sway/Budgie/COSMIC are pulled unverified, and Universal Blue desktop changes
+> are experimental and unsupported upstream. Use at your own risk, on a system
+> you can afford to reinstall or roll back.
 
 ## What actually happens on a rebase
 
@@ -78,7 +84,7 @@ isn't migrated, and how confident each mechanism is per desktop.
 
 ## Requirements
 
-- A running Fedora Atomic Desktop install (any of the five above), with
+- A running Fedora Atomic Desktop install (any supported desktop above), with
   `rpm-ostree` and `sudo` available (present by default on all of them).
   `jq` is used if present for more reliable image-reference detection, but
   isn't required.
@@ -86,15 +92,9 @@ isn't migrated, and how confident each mechanism is per desktop.
   (both required, not just `jq` if present): since those images have no
   `:latest` tag, the script queries the quay.io API at rebase time to find
   their current latest stable tag.
-- Your install must be deployed **container-native** (from a
-  `quay.io/fedora/...`-style container image), not from the classic ostree
-  `fedora:fedora/...` remote that ships by default on install media — these
-  scripts identify the current/target desktop from the container image
-  reference and can't compute a rebase target from a plain ostree ref. Check
-  with `rpm-ostree status`; if you're on the ostree remote, first rebase to
-  your current desktop's container image (e.g.
-  `sudo rpm-ostree rebase ostree-remote-registry:fedora:quay.io/fedora/fedora-silverblue:<version>`)
-  before using `Atomic-rebase.sh`.
+- The classic `fedora:fedora/...` ostree ref that ships on install media is
+  recognized for Silverblue and Kinoite only. Other sources must already use
+  a known container-image reference. Check with `rpm-ostree status`.
 - Run as your normal user, not root — the scripts elevate with `sudo`
   internally only for the `rpm-ostree rebase` step itself, and for
   `restore-config.sh`'s optional re-layering of known-safe packages (see
@@ -104,7 +104,7 @@ isn't migrated, and how confident each mechanism is per desktop.
 ## Usage
 
 ```bash
-./Atomic-rebase.sh --to <silverblue|kinoite|budgie|sway|cosmic>
+./Atomic-rebase.sh --to <silverblue|kinoite|budgie|sway|cosmic|bluefin|aurora|bazzite|bazzite-gnome>
 ```
 
 This detects your current desktop from the booted image, computes the
@@ -133,12 +133,31 @@ The script:
    unverified image, then asks for confirmation before doing anything (skip
    the prompt with `-y`; preview only with `--dry-run`).
 4. Runs `rpm-ostree rebase` (via `sudo`) to stage the new deployment.
-5. Tells you to reboot, and to run `bin/lib/restore-config.sh` afterwards.
+5. Tells you the appropriate reboot/restore next step.
+
+### Universal Blue two-stage entry
+
+Universal Blue images are cosign-signed, but entering them from Fedora or an
+unverified image needs a bootstrap deployment. On the first command targeting
+`bluefin`, `aurora`, `bazzite`, or `bazzite-gnome`, the script uses
+`ostree-unverified-registry:ghcr.io/ublue-os/<image>:stable`. Reboot into that
+deployment, then rerun the **same** `./Atomic-rebase.sh --to <target>` command.
+The second rebase uses
+`ostree-image-signed:docker://ghcr.io/ublue-os/<image>:stable`.
+
+Do not run `restore-config.sh` after the bootstrap deployment. Restore settings
+only after rebooting into the final signed UBlue deployment. A switch directly
+from one already signed UBlue image to another uses the signed transport
+immediately, so it has the ordinary single rebase/reboot/restore flow. The
+second-stage command preserves the backup created before bootstrap so the
+final restore uses the original desktop settings. Finish this second stage
+before choosing another target; to abandon the bootstrap deployment, use
+`rpm-ostree rollback`.
 
 After rebooting into the new desktop:
 
 ```bash
-bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic>
+bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic|bluefin|aurora|bazzite|bazzite-gnome>
 ```
 
 This re-applies the settings captured in step 2 that have a known
@@ -189,6 +208,7 @@ changes. Security issues should be reported privately per
   settings.
 - The [Sway](https://swaywm.org/) and [COSMIC](https://system76.com/cosmic/)
   projects.
+- [Universal Blue](https://universal-blue.org/) and the [Bluefin](https://github.com/ublue-os/bluefin/blob/main/.github/workflows/build-image-stable.yml), [Aurora](https://github.com/ublue-os/aurora/blob/main/.github/workflows/build-image-stable.yml), and [Bazzite](https://docs.bazzite.gg/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/rebase_guide/) projects.
 
 ## License
 

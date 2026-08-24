@@ -1,11 +1,16 @@
 # Setting equivalents across Fedora Atomic Desktops
 
 Fedora's Atomic Desktops store almost nothing in a compatible format, and
-three of the five (Sway, Budgie, Cosmic Atomic) have no confirmed, reliable
+three desktop families (Sway, Budgie, and COSMIC Atomic) have no confirmed, reliable
 CLI for reading/writing some settings at all. So this is a short, explicit
 list rather than a generic mapping engine — `restore-config.sh` implements
 exactly these translations in code, nothing more, and is honest in its
 warnings about which of these are solid vs. best-effort.
+
+Bluefin and Bazzite GNOME use every GNOME mapping below; Aurora and Bazzite use
+every KDE Plasma mapping below. Their settings are detected from the active
+GNOME or KDE session already, so `backup-config.sh` needs no image-specific
+branch. The target cases in `restore-config.sh` apply these same mappings.
 
 ## Actively migrated
 
