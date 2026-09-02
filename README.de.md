@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Shell: Bash](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnubash&logoColor=white)](Atomic-rebase.sh)
 [![ShellCheck](https://github.com/Pat9496/Atomic-rebase/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/Pat9496/Atomic-rebase/actions/workflows/shellcheck.yml)
+[![Fedora](https://img.shields.io/badge/Fedora-Atomic%20Desktop-0B57A6)](https://fedoraproject.org/atomic-desktops/)
 
 Hilfsskripte, um eine [Fedora Atomic Desktop](https://fedoraproject.org/atomic-desktops/)-Installation zwischen verschiedenen Desktop-Umgebungs-Images zu wechseln, wobei so viel wie möglich der bestehenden Benutzerkonfiguration erhalten bleibt.
 
