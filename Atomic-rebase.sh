@@ -65,14 +65,23 @@ target_ref="$(compute_target_image_ref "${current_ref}" "${TARGET}")"
 
 log "Current desktop: ${current} (${current_ref})"
 log "Target image:    ${target_ref}"
-warn "Rebasing between Fedora Atomic Desktop variants is not an officially supported workflow; see README.md."
+warn "Cross-image rebasing is not an officially documented workflow; see README.md."
 
-if [[ "${DESKTOP_OFFICIAL[$TARGET]}" != "1" ]]; then
-    warn "${TARGET} is published under a separate registry namespace (quay.io/fedora-ostree-desktops) that isn't covered by the pre-configured signed 'fedora' ostree remote. It will be pulled unverified."
-fi
+case "${DESKTOP_TRANSPORT[$TARGET]}" in
+    quay-unverified)
+        warn "${TARGET} is published under a separate registry namespace (quay.io/fedora-ostree-desktops) that isn't covered by the pre-configured signed 'fedora' ostree remote. It will be pulled unverified."
+        ;;
+    ublue-signed)
+        warn "${TARGET} is a Universal Blue image. Universal Blue's signed image transport is used only after the initial unverified bootstrap; desktop changes remain experimental and unsupported upstream."
+        ;;
+esac
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
-    log "Dry run: would back up current settings, then run: sudo rpm-ostree rebase ${target_ref}"
+    if is_ublue_unverified_ref "${current_ref}" "${TARGET}"; then
+        log "Dry run: would preserve the initial-entry backup, then run: sudo rpm-ostree rebase ${target_ref}"
+    else
+        log "Dry run: would back up current settings, then run: sudo rpm-ostree rebase ${target_ref}"
+    fi
     exit 0
 fi
 
@@ -81,12 +90,20 @@ if ! confirm "Proceed with rebasing to ${target_ref}?"; then
     exit 1
 fi
 
-backup_dir="$("${SCRIPT_DIR}/bin/lib/backup-config.sh")"
-log "Settings backed up to ${backup_dir}"
+if is_ublue_unverified_ref "${current_ref}" "${TARGET}"; then
+    log "Preserving the backup from the Universal Blue initial entry for the final restore."
+else
+    backup_dir="$("${SCRIPT_DIR}/bin/lib/backup-config.sh")"
+    log "Settings backed up to ${backup_dir}"
+fi
 
 sudo rpm-ostree rebase "${target_ref}"
 
 log "Rebase staged successfully."
-log "Next steps:"
-log "  1. Reboot into the new deployment."
-log "  2. Run: ${SCRIPT_DIR}/bin/lib/restore-config.sh --to ${TARGET}"
+if is_ublue_unverified_ref "${target_ref}" "${TARGET}"; then
+    log "Universal Blue initial entry uses two stages. Reboot into the new deployment, then rerun this same command to enter the signed image."
+else
+    log "Next steps:"
+    log "  1. Reboot into the new deployment."
+    log "  2. Run: ${SCRIPT_DIR}/bin/lib/restore-config.sh --to ${TARGET}"
+fi

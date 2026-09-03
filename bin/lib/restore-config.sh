@@ -91,7 +91,7 @@ skipped=()
 apply_dark_mode() {
     local target="$1" value="$2"
     case "${target}" in
-        silverblue|budgie)
+        silverblue|budgie|bluefin|bazzite-gnome)
             require_cmd gsettings
             if [[ "${value}" == "true" ]]; then
                 gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
@@ -99,7 +99,7 @@ apply_dark_mode() {
                 gsettings set org.gnome.desktop.interface color-scheme 'default'
             fi
             ;;
-        kinoite)
+        kinoite|aurora|bazzite)
             require_cmd plasma-apply-colorscheme
             if [[ "${value}" == "true" ]]; then
                 plasma-apply-colorscheme BreezeDark
@@ -144,14 +144,14 @@ fi
 if [[ -n "${WALLPAPER_PATH}" ]]; then
     log "Applying wallpaper (${WALLPAPER_PATH}) to ${target_desktop}..."
     case "${target_desktop}" in
-        silverblue)
+        silverblue|bluefin|bazzite-gnome)
             require_cmd gsettings
             wallpaper_uri="file://${WALLPAPER_PATH}"
             gsettings set org.gnome.desktop.background picture-uri "${wallpaper_uri}"
             gsettings set org.gnome.desktop.background picture-uri-dark "${wallpaper_uri}"
             applied+=("wallpaper")
             ;;
-        kinoite)
+        kinoite|aurora|bazzite)
             require_cmd plasma-apply-wallpaperimage
             plasma-apply-wallpaperimage "${WALLPAPER_PATH}"
             applied+=("wallpaper")
@@ -182,7 +182,7 @@ fi
 apply_accent_color() {
     local target="$1" value="$2"
     case "${target}" in
-        silverblue|budgie)
+        silverblue|budgie|bluefin|bazzite-gnome)
             require_cmd gsettings
             gsettings set org.gnome.desktop.interface accent-color "${value}"
             ;;
@@ -191,7 +191,7 @@ apply_accent_color() {
             warn "Sway has no desktop-wide accent color; only the GTK app accent-color is being set."
             gsettings set org.gnome.desktop.interface accent-color "${value}"
             ;;
-        kinoite)
+        kinoite|aurora|bazzite)
             require_cmd plasma-apply-colorscheme
             local kde_color="${value}"
             # GNOME's "slate" isn't a standard SVG/CSS color name; slategray
@@ -230,7 +230,7 @@ fi
 apply_input_layouts() {
     local target="$1" value="$2"
     case "${target}" in
-        silverblue|budgie)
+        silverblue|budgie|bluefin|bazzite-gnome)
             require_cmd gsettings
             local tuples="" layout first=1 layout_arr
             IFS=',' read -ra layout_arr <<< "${value}"
@@ -246,7 +246,7 @@ apply_input_layouts() {
             [[ -n "${tuples}" ]] || return 1
             gsettings set org.gnome.desktop.input-sources sources "[${tuples}]"
             ;;
-        kinoite)
+        kinoite|aurora|bazzite)
             kde_write_config --file kxkbrc --group Layout --key LayoutList "${value}"
             kde_write_config --file kxkbrc --group Layout --key Use true
             kwin_reconfigure
@@ -285,12 +285,12 @@ fi
 apply_night_light() {
     local target="$1" enabled="$2" temp="$3"
     case "${target}" in
-        silverblue|budgie)
+        silverblue|budgie|bluefin|bazzite-gnome)
             require_cmd gsettings
             gsettings set org.gnome.settings-daemon.plugins.color night-light-enabled "${enabled}"
             [[ -n "${temp}" ]] && gsettings set org.gnome.settings-daemon.plugins.color night-light-temperature "${temp}"
             ;;
-        kinoite)
+        kinoite|aurora|bazzite)
             kde_write_config --file kwinrc --group NightColor --key Active "${enabled}"
             [[ -n "${temp}" ]] && kde_write_config --file kwinrc --group NightColor --key NightTemperature "${temp}"
             kwin_reconfigure
@@ -322,12 +322,12 @@ fi
 apply_idle_lock() {
     local target="$1" lock_enabled="$2" delay_seconds="$3"
     case "${target}" in
-        silverblue|budgie)
+        silverblue|budgie|bluefin|bazzite-gnome)
             require_cmd gsettings
             [[ -n "${lock_enabled}" ]] && gsettings set org.gnome.desktop.screensaver lock-enabled "${lock_enabled}"
             [[ -n "${delay_seconds}" ]] && gsettings set org.gnome.desktop.session idle-delay "${delay_seconds}"
             ;;
-        kinoite)
+        kinoite|aurora|bazzite)
             [[ -n "${lock_enabled}" ]] && kde_write_config --file kscreenlockerrc --group Daemon --key Autolock "${lock_enabled}"
             if [[ -n "${delay_seconds}" && "${delay_seconds}" -eq 0 ]]; then
                 warn "Source idle-delay was 0 (\"never\"); KDE's Timeout has no equivalent value, so it's left unset (rely on Autolock instead)."
@@ -363,12 +363,12 @@ fi
 apply_keyboard_repeat() {
     local target="$1" delay_ms="$2" interval_ms="$3"
     case "${target}" in
-        silverblue|budgie)
+        silverblue|budgie|bluefin|bazzite-gnome)
             require_cmd gsettings
             [[ -n "${delay_ms}" ]] && gsettings set org.gnome.desktop.peripherals.keyboard delay "${delay_ms}"
             [[ -n "${interval_ms}" ]] && gsettings set org.gnome.desktop.peripherals.keyboard repeat-interval "${interval_ms}"
             ;;
-        kinoite)
+        kinoite|aurora|bazzite)
             [[ -n "${delay_ms}" ]] && kde_write_config --file kcminputrc --group Keyboard --key RepeatDelay "${delay_ms}"
             if [[ -n "${interval_ms}" ]]; then
                 local rate_cps
