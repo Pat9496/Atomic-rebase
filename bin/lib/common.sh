@@ -203,15 +203,16 @@ load_settings_file() {
 # Fedora Atomic Desktop image catalog: desktop name -> registry/path/image-name
 # (no tag). Silverblue and Kinoite are official Fedora images, verified and
 # pulled through the "fedora" ostree remote pre-configured on every Atomic
-# Desktop install. Budgie/Sway/Cosmic Atomic are community-maintained images
-# published under a separate quay.io organization with no equivalent signed
-# remote configured out of the box, so they are always pulled unverified. See
+# Desktop install, and so is Sway (fedora-sway-atomic, ":latest" = stable).
+# Budgie/Cosmic Atomic are community-maintained images published under a
+# separate quay.io organization with no equivalent signed remote configured
+# out of the box, so they are always pulled unverified. See
 # DESKTOP_OFFICIAL below and README.md.
 declare -gA DESKTOP_IMAGE=(
     [silverblue]="quay.io/fedora/fedora-silverblue"
     [kinoite]="quay.io/fedora/fedora-kinoite"
     [budgie]="quay.io/fedora-ostree-desktops/budgie-atomic"
-    [sway]="quay.io/fedora-ostree-desktops/sway-atomic"
+    [sway]="quay.io/fedora/fedora-sway-atomic"
     [cosmic]="quay.io/fedora-ostree-desktops/cosmic-atomic"
 )
 
@@ -219,7 +220,7 @@ declare -gA DESKTOP_OFFICIAL=(
     [silverblue]=1
     [kinoite]=1
     [budgie]=0
-    [sway]=0
+    [sway]=1
     [cosmic]=0
 )
 
@@ -260,6 +261,12 @@ get_current_image_ref() {
 # part that reliably identifies which desktop is booted.
 desktop_from_image_ref() {
     local ref="$1" name path
+    # Sway used to be pulled from the community namespace; installs rebased
+    # with an earlier version of this tool still boot that image.
+    if [[ "${ref}" == *"quay.io/fedora-ostree-desktops/sway-atomic"* ]]; then
+        printf 'sway\n'
+        return 0
+    fi
     for name in "${!DESKTOP_IMAGE[@]}"; do
         path="${DESKTOP_IMAGE[$name]}"
         if [[ "${ref}" == *"${path}"* ]]; then
@@ -271,7 +278,7 @@ desktop_from_image_ref() {
     # Classic (non-container) ostree refspec, e.g. "fedora:fedora/43/x86_64/kinoite"
     # — the format installs have before they've been rebased to the OCI
     # container image. Only Silverblue/Kinoite ship this way via the "fedora"
-    # remote; Budgie/Sway/COSMIC only exist as container images.
+    # remote; Sway/Budgie/COSMIC only exist as container images.
     for name in "${!DESKTOP_IMAGE[@]}"; do
         if [[ "${DESKTOP_OFFICIAL[$name]}" == "1" && "${ref}" == fedora:fedora/*/*/"${name}" ]]; then
             printf '%s\n' "${name}"
@@ -283,7 +290,7 @@ desktop_from_image_ref() {
     return 1
 }
 
-# Budgie/Sway/COSMIC Atomic have no ":latest" tag, only major-version tags
+# Budgie/COSMIC Atomic have no ":latest" tag, only major-version tags
 # ("43", "44", "45", ...). quay.io publishes the next release's tag as soon as
 # builds for it start, long before that release is GA, so the highest numeric
 # tag in the repository is a pre-release (Beta) image, not the stable one.
@@ -342,7 +349,7 @@ latest_stable_tag_for_image() {
 # Builds the image reference to rebase to: always the target desktop's own
 # latest stable release, never whatever tag/digest current_ref happens to be
 # on. Silverblue/Kinoite keep ":latest" pointed at the current stable release,
-# so that tag is used directly. Budgie/Sway/COSMIC have no ":latest" tag —
+# so that tag is used directly. Budgie/COSMIC have no ":latest" tag —
 # only numeric major-version tags, so latest_stable_tag_for_image uses the
 # current stable Fedora release number (from Bodhi) as the tag. Also picks
 # the canonical transport for the target's trust level

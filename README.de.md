@@ -28,17 +28,17 @@ Hilfsskripte, um eine [Fedora Atomic Desktop](https://fedoraproject.org/atomic-d
 | GNOME | `silverblue` | `quay.io/fedora/fedora-silverblue` | Durch die vorkonfigurierte signierte `fedora` ostree-Remote abgedeckt |
 | KDE Plasma | `kinoite` | `quay.io/fedora/fedora-kinoite` | Durch die vorkonfigurierte signierte `fedora` ostree-Remote abgedeckt |
 | Budgie | `budgie` | `quay.io/fedora-ostree-desktops/budgie-atomic` | Nicht durch die `fedora`-Remote abgedeckt, unverified abgerufen |
-| Sway | `sway` | `quay.io/fedora-ostree-desktops/sway-atomic` | Nicht durch die `fedora`-Remote abgedeckt, unverified abgerufen |
+| Sway | `sway` | `quay.io/fedora/fedora-sway-atomic` | Durch die vorkonfigurierte signierte `fedora` ostree-Remote abgedeckt |
 | COSMIC | `cosmic` | `quay.io/fedora-ostree-desktops/cosmic-atomic` | Nicht durch die `fedora`-Remote abgedeckt, unverified abgerufen |
 
 Jeder der fünf Desktops kann zu jedem anderen gewechselt werden.
 
 ## Warum es das gibt
 
-Fedora stellt jede Atomic Desktop als ein eigenes separates Container-Image bereit, das über `rpm-ostree rebase` ausgetauscht wird. Silverblue und Kinoite werden über die signierte `fedora` ostree-Remote abgerufen, die auf jeder Atomic Desktop-Installation vorkonfiguriert ist. Sway Atomic (früher Sericea), Budgie Atomic (früher Onyx) und COSMIC Atomic werden von ihren jeweiligen SIGs gepflegt und unter einem separaten Registry-Namespace veröffentlicht, der nicht von dieser vorkonfigurierten Remote abgedeckt wird — `rpm-ostree` ruft diese unverified ab.
+Fedora stellt jede Atomic Desktop als ein eigenes separates Container-Image bereit, das über `rpm-ostree rebase` ausgetauscht wird. Silverblue, Kinoite und Sway Atomic (früher Sericea) werden über die signierte `fedora` ostree-Remote abgerufen, die auf jeder Atomic Desktop-Installation vorkonfiguriert ist. Budgie Atomic (früher Onyx) und COSMIC Atomic werden von ihren jeweiligen SIGs gepflegt und unter einem separaten Registry-Namespace veröffentlicht, der nicht von dieser vorkonfigurierten Remote abgedeckt wird — `rpm-ostree` ruft diese unverified ab.
 
 > [!WARNING]
-> Das Rebasing zwischen Fedora Atomic Desktop-Varianten ist kein offiziell dokumentierter/unterstützter Arbeitsablauf, und das Rebasing auf ein Sway/Budgie/COSMIC Atomic-Image bedeutet, einem unverified, von der Community gepflegten Image zu vertrauen. Einsatz auf eigenes Risiko, nur auf Systemen, die neu installiert oder zurückgerollt werden können.
+> Das Rebasing zwischen Fedora Atomic Desktop-Varianten ist kein offiziell dokumentierter/unterstützter Arbeitsablauf, und das Rebasing auf ein Budgie/COSMIC Atomic-Image bedeutet, einem unverified, von der Community gepflegten Image zu vertrauen. Einsatz auf eigenes Risiko, nur auf Systemen, die neu installiert oder zurückgerollt werden können.
 
 ## Was bei einem Rebase tatsächlich passiert
 
@@ -52,7 +52,7 @@ Diese Skripte sichern einen Snapshot der aktuellen Einstellungen zur Referenz un
 ## Anforderungen
 
 - Eine laufende Fedora Atomic Desktop-Installation (eine der fünf oben), mit `rpm-ostree` und `sudo` verfügbar (standardmäßig auf allen vorhanden). `jq` wird verwendet, falls vorhanden, für zuverlässigere Image-Referenz-Erkennung, ist aber nicht erforderlich.
-- Das Rebasing zu Budgie, Sway oder COSMIC erfordert zusätzlich `curl` und `jq` (beide erforderlich, nicht nur `jq`, falls vorhanden): Da diese Images kein `:latest`-Tag haben, fragt das Skript bodhi.fedoraproject.org ab, um das aktuelle stabile Fedora-Release zu identifizieren, und bestätigt dann, dass dieses Tag auf quay.io existiert, bevor es rebaset wird.
+- Das Rebasing zu Budgie oder COSMIC erfordert zusätzlich `curl` und `jq` (beide erforderlich, nicht nur `jq`, falls vorhanden): Da diese Images kein `:latest`-Tag haben, fragt das Skript bodhi.fedoraproject.org ab, um das aktuelle stabile Fedora-Release zu identifizieren, und bestätigt dann, dass dieses Tag auf quay.io existiert, bevor es rebaset wird.
 - Die Installation muss **container-native** bereitgestellt sein (aus einem Container-Image im Stil `quay.io/fedora/...`), nicht aus der klassischen ostree-Remote `fedora:fedora/...`, die standardmäßig auf Installationsmedien enthalten ist — diese Skripte identifizieren den aktuellen/Ziel-Desktop aus der Container-Image-Referenz und können kein Rebase-Ziel aus einer einfachen ostree-Referenz berechnen. Mit `rpm-ostree status` überprüfen. Falls die ostree-Remote verwendet wird: zunächst ein Rebasing zum Container-Image des aktuellen Desktops durchführen (z. B. `sudo rpm-ostree rebase ostree-remote-registry:fedora:quay.io/fedora/fedora-silverblue:<version>`), vor Verwendung von `Atomic-rebase.sh`.
 - Als normaler Benutzer ausführen, nicht als Root. Die Skripte erhöhen nur für den `rpm-ostree rebase`-Schritt selbst mit `sudo` und für die optionale Neuschichtung bekannter sicherer Pakete von `restore-config.sh`, da die dconf/gsettings/flatpak-Inspektion in der eigenen Benutzersitzung laufen muss.
 
@@ -88,6 +88,8 @@ Nach dem Neustart in den neuen Desktop:
 ```bash
 bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic>
 ```
+
+Für Sway verschiebt `--fresh-sway-config` eine vorhandene `~/.config/sway/config` beiseite (als `config.bak-<timestamp>`, nie gelöscht), sodass Sway mit Fedoras Standardkonfiguration plus dem erzeugten Drop-in startet.
 
 Dies wendet die in Schritt 2 erfassten Einstellungen erneut an, die eine bekannte Entsprechung im neuen Desktop haben: dunkler/heller Modus, Hintergrundbild, Akzentfarbe, Tastaturlayouts, Nachtlicht, Bildschirmsperre, Tastenwiederholung und Standard-Terminal (sofern verfügbar). Für Sway wird dazu eine erzeugte Datei `~/.config/sway/config.d/99-atomic-rebase.conf` geschrieben, die diese Einstellungen persistent speichert. Es bietet auch an, alle ostree-geschichteten RPM-Pakete (`rpm-ostree install`) aus einer kleinen Zulassungsliste von bekannten, desktop-agnostischen CLI-Tools (alacritty, btop, chezmoi, cmatrix, distrobox, fastfetch, gh, htop, neovim, podman-compose, rpmdevtools, tmux, vim-enhanced, xclip, xdotool, xsel und alle `git`/`git-*`-Pakete) neu zu schichten, die auf dem alten Desktop geschichtet waren — einmal bestätigen (oder `-y`/`--yes` übergeben, um die Aufforderung zu überspringen) und es schichtet sie über `sudo` erneut, wirksam beim nächsten Neustart. Alles andere Geschichtete — einschließlich hardwarespezifischer Treiber/akmods (z. B. `xorg-x11-drv-nvidia`, `akmod-nvidia`) und des Virtualisierungs-Stacks (`libvirt`, `qemu-kvm`, `virt-install`, `swtpm`, `edk2-ovmf`), das kernelversions- oder hardwaregekoppelt ist und zu bedeutsam zum unbeaufsichtigten Neuinstallieren — wird zur manuellen Neuinstallation überlassen. Es schreibt eine `MANUAL-STEPS.txt` neben der Sicherung, die auflistet, was in diesem Durchlauf migriert wurde und was nicht (Panel/Dock-Layout, Tastaturkürzel, Standard-App-Zuordnungen, Desktop-Erweiterungen/Widgets und ähnliches Desktop-spezifisches Setup sind immer manuell — siehe [`config-map/README.md`](config-map/README.md)).
 

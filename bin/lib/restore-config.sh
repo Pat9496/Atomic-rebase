@@ -8,12 +8,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 require_not_root
 
 usage() {
-    printf 'Usage: %s --to <%s> [--from <backup-dir>] [-y|--yes]\n' \
+    printf 'Usage: %s --to <%s> [--from <backup-dir>] [--fresh-sway-config] [-y|--yes]\n' \
         "$(basename "${BASH_SOURCE[0]}")" "$(known_desktops | paste -sd'|')" >&2
 }
 
 target_desktop=""
 from_dir=""
+fresh_sway_config=0
 ASSUME_YES="${ASSUME_YES:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -27,6 +28,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { err "--from requires an argument."; exit 1; }
             from_dir="$2"
             shift 2
+            ;;
+        --fresh-sway-config)
+            fresh_sway_config=1
+            shift
             ;;
         -y|--yes)
             ASSUME_YES=1
@@ -47,6 +52,11 @@ done
 if ! is_known_desktop "${target_desktop}"; then
     err "You must specify --to <desktop>."
     usage
+    exit 1
+fi
+
+if ((fresh_sway_config)) && [[ "${target_desktop}" != "sway" ]]; then
+    err "--fresh-sway-config only applies with --to sway."
     exit 1
 fi
 
@@ -284,7 +294,34 @@ write_sway_dropin() {
     fi
 }
 
+# Sway never merges configs, so a broken ~/.config/sway/config (e.g. one
+# carried over from an older install) stops the whole session from coming up
+# no matter what the drop-in says. Moving it aside, not deleting it, lets
+# /etc/sway/config (Fedora's default, which includes config.d) take over.
+reset_sway_main_config() {
+    local main_config="${HOME}/.config/sway/config" backup=""
+
+    if [[ ! -e "${main_config}" && ! -L "${main_config}" ]]; then
+        log "No ${main_config} present; sway will already use its default config."
+        return 0
+    fi
+    if ! confirm "Move ${main_config} aside so sway starts from a fresh default config?"; then
+        warn "Keeping the existing ${main_config}."
+        return 0
+    fi
+    backup="${main_config}.bak-$(date +%Y%m%d-%H%M%S)"
+    if mv -- "${main_config}" "${backup}"; then
+        log "Moved ${main_config} to ${backup}"
+        manual_notes+=("Sway: the previous ${main_config} was moved to ${backup}; sway now starts from /etc/sway/config plus the generated drop-in. Copy over only the parts of the old file you still want, into a file in ~/.config/sway/config.d/ that sorts after 99-atomic-rebase.conf (e.g. 99-local.conf).")
+    else
+        warn "Could not move ${main_config} aside; keeping it."
+    fi
+}
+
 if [[ "${target_desktop}" == "sway" ]]; then
+    if ((fresh_sway_config)); then
+        reset_sway_main_config
+    fi
     build_sway_dropin
     write_sway_dropin || true
 fi

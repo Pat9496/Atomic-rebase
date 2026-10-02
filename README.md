@@ -31,7 +31,7 @@ possible.
 | GNOME | `silverblue` | `quay.io/fedora/fedora-silverblue` | Covered by the pre-configured signed `fedora` ostree remote |
 | KDE Plasma | `kinoite` | `quay.io/fedora/fedora-kinoite` | Covered by the pre-configured signed `fedora` ostree remote |
 | Budgie | `budgie` | `quay.io/fedora-ostree-desktops/budgie-atomic` | Not covered by the `fedora` remote, pulled unverified |
-| Sway | `sway` | `quay.io/fedora-ostree-desktops/sway-atomic` | Not covered by the `fedora` remote, pulled unverified |
+| Sway | `sway` | `quay.io/fedora/fedora-sway-atomic` | Covered by the pre-configured signed `fedora` ostree remote |
 | COSMIC | `cosmic` | `quay.io/fedora-ostree-desktops/cosmic-atomic` | Not covered by the `fedora` remote, pulled unverified |
 
 Any of the five can be rebased to any other.
@@ -39,16 +39,16 @@ Any of the five can be rebased to any other.
 ## Why this exists
 
 Fedora ships each Atomic Desktop as its own separate container image,
-swapped via `rpm-ostree rebase`. Silverblue and Kinoite are pulled through the
+swapped via `rpm-ostree rebase`. Silverblue, Kinoite, and Sway Atomic (formerly Sericea) are pulled through the
 signed `fedora` ostree remote that's pre-configured on every Atomic Desktop
-install. Sway Atomic (formerly Sericea), Budgie Atomic (formerly Onyx), and
+install. Budgie Atomic (formerly Onyx) and
 COSMIC Atomic are maintained by their respective SIGs and published under a
 separate registry namespace that isn't covered by that same pre-configured
 remote — `rpm-ostree` pulls those unverified.
 
 > [!WARNING]
 > Rebasing between Fedora Atomic Desktop variants is not an officially
-> documented/supported workflow, and rebasing to a Sway/Budgie/COSMIC Atomic
+> documented/supported workflow, and rebasing to a Budgie/COSMIC Atomic
 > image means trusting an unverified, community-maintained image. Use at
 > your own risk, on a system you can afford to reinstall or roll back.
 
@@ -84,7 +84,7 @@ isn't migrated, and how confident each mechanism is per desktop.
   `rpm-ostree` and `sudo` available (present by default on all of them).
   `jq` is used if present for more reliable image-reference detection, but
   isn't required.
-- Rebasing to Budgie, Sway, or COSMIC additionally requires `curl` and `jq`
+- Rebasing to Budgie or COSMIC additionally requires `curl` and `jq`
   (both required, not just `jq` if present): since those images have no
   `:latest` tag, the script queries bodhi.fedoraproject.org to identify the
   current stable Fedora release, then confirms that tag exists on quay.io
@@ -146,6 +146,10 @@ After rebooting into the new desktop:
 ```bash
 bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic>
 ```
+
+For Sway, add `--fresh-sway-config` to move an existing
+`~/.config/sway/config` aside (as `config.bak-<timestamp>`, never deleted)
+so sway starts from Fedora's default config plus the generated drop-in.
 
 This re-applies the settings captured in step 2 that have a known
 equivalent in the new desktop. It also offers to re-layer any ostree-layered
