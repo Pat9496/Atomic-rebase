@@ -78,7 +78,7 @@ readonly SETTINGS_FORMAT_HEADER="# atomic-rebase settings format 2"
 readonly SETTINGS_KEYS=(
     SOURCE_DESKTOP DARK_MODE WALLPAPER_PATH AVATAR_PATH ACCENT_COLOR
     INPUT_LAYOUTS NIGHT_LIGHT NIGHT_LIGHT_TEMP IDLE_LOCK IDLE_DELAY_SECONDS
-    KEY_REPEAT_DELAY_MS KEY_REPEAT_INTERVAL_MS
+    KEY_REPEAT_DELAY_MS KEY_REPEAT_INTERVAL_MS TERMINAL_CMD
 )
 
 # Decodes a value written by older versions of backup-config.sh, which used
@@ -103,8 +103,9 @@ decode_legacy_quoted_value() {
 
 # Returns 0 if the value is acceptable for the given settings key. Values end
 # up as arguments to gsettings/kwriteconfig6/plasma-apply-*, and INPUT_LAYOUTS
-# is also interpolated into a GVariant string, so each key is held to the
-# narrowest shape it can legitimately have.
+# is also interpolated into a GVariant string and into the generated Sway
+# drop-in (as is TERMINAL_CMD), so each key is held to the narrowest shape it
+# can legitimately have.
 settings_value_is_valid() {
     local key="$1" value="$2"
     case "${key}" in
@@ -115,8 +116,36 @@ settings_value_is_valid() {
         NIGHT_LIGHT_TEMP|IDLE_DELAY_SECONDS|KEY_REPEAT_DELAY_MS|KEY_REPEAT_INTERVAL_MS)
             [[ "${value}" =~ ^[0-9]+$ ]] ;;
         WALLPAPER_PATH|AVATAR_PATH) [[ -n "${value}" && "${value}" != -* ]] ;;
+        TERMINAL_CMD) [[ "${value}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ;;
         *) return 1 ;;
     esac
+}
+
+# Returns 0 for launchers/shells that commonly prefix a terminal command line
+# (e.g. "env FOO=1 konsole"). Taking only the first word of such a line would
+# yield the launcher, not the terminal, so it must never be used as one.
+is_terminal_launcher_name() {
+    case "$1" in
+        env|sh|bash|dash|zsh|fish|sudo|flatpak) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Reduces a terminal command line (a gsettings string with its quotes already
+# removed, or KDE's TerminalApplication) to the bare binary name of its first
+# word, e.g. "/usr/bin/konsole --foo" -> "konsole". Arguments are dropped on
+# purpose: only the binary can be safely re-mapped to another desktop. Prints
+# nothing and returns 1 if no valid name results.
+terminal_command_name() {
+    local raw="$1" first
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    first="${raw%%[[:space:]]*}"
+    first="${first#[\"\']}"
+    first="${first%[\"\']}"
+    first="${first##*/}"
+    settings_value_is_valid TERMINAL_CMD "${first}" || return 1
+    ! is_terminal_launcher_name "${first}" || return 1
+    printf '%s\n' "${first}"
 }
 
 # Reads a settings.env file into the global variables named by
@@ -254,72 +283,71 @@ desktop_from_image_ref() {
     return 1
 }
 
-# Queries the quay.io API for the most recent stable major-version tag of a
-# Fedora Atomic Desktop image (e.g. "44"). Unlike Silverblue/Kinoite (see
-# compute_target_image_ref below), Budgie/Sway/COSMIC Atomic have no ":latest"
-# tag: their major-version tags (e.g. "43", "44", "45") get re-pushed on every
-# new build, and whichever numeric tag is currently also tagged "rawhide"
-# hasn't stabilized yet. That one is excluded; the next-highest is returned.
-#
-# The "rawhide" tag is looked up on its own with specificTag instead of being
-# searched for in the tag listing: these repositories hold thousands of tags
-# (every build plus a .sig tag per digest, ~60 pages at limit=100), so the
-# first page does not reliably contain it (it is missing for cosmic-atomic),
-# and walking every page for one tag would be slow and fragile. The numeric
-# major-version tags are re-pushed on every build and so stay on the first
-# page of the listing, which is newest-first.
+# Budgie/Sway/COSMIC Atomic have no ":latest" tag, only major-version tags
+# ("43", "44", "45", ...). quay.io publishes the next release's tag as soon as
+# builds for it start, long before that release is GA, so the highest numeric
+# tag in the repository is a pre-release (Beta) image, not the stable one.
+# The authoritative source for "which Fedora release is stable" is Bodhi, so
+# the stable release number is taken from there and quay.io is only asked
+# whether that tag exists for the image.
 quay_api_get() {
     curl -fsSL --connect-timeout 10 -m 30 --retry 2 "$1" 2>/dev/null
 }
 
+# Prints the newest Fedora release number Bodhi lists in state "current",
+# i.e. the newest stable release. Pre-releases (Beta) and Rawhide are in other
+# states and are therefore never returned. rows_per_page is set well above the
+# number of current releases (Fedora, EPEL, Container, Flatpak, ...) so the
+# list is never truncated to a first page.
+latest_stable_fedora_release() {
+    local releases_json release
+
+    releases_json="$(curl -fsSL --connect-timeout 10 -m 20 --retry 2 \
+        'https://bodhi.fedoraproject.org/releases/?state=current&rows_per_page=50' 2>/dev/null)" || {
+        err "Failed to query bodhi.fedoraproject.org for the current Fedora releases."
+        return 1
+    }
+
+    release="$(jq -r '[.releases[] | select(.id_prefix=="FEDORA") | .version | tonumber] | max' \
+        <<<"${releases_json}" 2>/dev/null)" || release=""
+
+    if [[ ! "${release}" =~ ^[0-9]+$ ]]; then
+        err "Could not determine the current stable Fedora release from bodhi.fedoraproject.org."
+        return 1
+    fi
+    printf '%s\n' "${release}"
+}
+
 latest_stable_tag_for_image() {
-    local image_path="$1" repo_path base_url tags_json rawhide_json rawhide_digest tag
+    local image_path="$1" repo_path release tag_json
 
     require_cmd curl
     require_cmd jq
 
+    release="$(latest_stable_fedora_release)" || return 1
+
     repo_path="${image_path#quay.io/}"
-    base_url="https://quay.io/api/v1/repository/${repo_path}/tag/?onlyActiveTags=true"
-
-    tags_json="$(quay_api_get "${base_url}&limit=100")" || {
-        err "Failed to query quay.io for tags of ${image_path}."
+    tag_json="$(quay_api_get "https://quay.io/api/v1/repository/${repo_path}/tag/?specificTag=${release}&onlyActiveTags=true")" || {
+        err "Failed to query quay.io for tag ${release} of ${image_path}."
         return 1
     }
 
-    rawhide_json="$(quay_api_get "${base_url}&specificTag=rawhide")" || {
-        err "Failed to query quay.io for the rawhide tag of ${image_path}."
-        return 1
-    }
-
-    rawhide_digest="$(jq -r '[.tags[] | select(.name=="rawhide")][0].manifest_digest // empty' <<<"${rawhide_json}" 2>/dev/null)" || {
-        err "Unexpected response from quay.io for the rawhide tag of ${image_path}."
-        return 1
-    }
-
-    tag="$(jq -r --arg rh "${rawhide_digest}" '
-        [.tags[] | select(.name | test("^[0-9]+$"))
-                 | select($rh == "" or .manifest_digest != $rh)
-                 | (.name | tonumber)]
-        | max // empty
-    ' <<<"${tags_json}" 2>/dev/null)" || tag=""
-
-    if [[ -z "${tag}" || "${tag}" == "null" ]]; then
-        err "Could not determine the most recent stable version tag for ${image_path} from quay.io."
+    if ! jq -e '.tags | length > 0' <<<"${tag_json}" >/dev/null 2>&1; then
+        err "${image_path} has no tag '${release}' on quay.io, although Fedora ${release} is the current stable release. Refusing to fall back to another tag."
         return 1
     fi
-    printf '%s\n' "${tag}"
+    printf '%s\n' "${release}"
 }
 
 # Builds the image reference to rebase to: always the target desktop's own
 # latest stable release, never whatever tag/digest current_ref happens to be
 # on. Silverblue/Kinoite keep ":latest" pointed at the current stable release,
 # so that tag is used directly. Budgie/Sway/COSMIC have no ":latest" tag —
-# their numeric major-version tags get re-pushed on every build, so
-# latest_stable_tag_for_image queries quay.io to find the highest one that
-# isn't still tracking "rawhide". Also picks the canonical transport for the
-# target's trust level (ostree-remote-registry:fedora: for the images signed
-# via the pre-configured "fedora" ostree remote, ostree-unverified-registry:
-# for the rest).
+# only numeric major-version tags, so latest_stable_tag_for_image uses the
+# current stable Fedora release number (from Bodhi) as the tag. Also picks
+# the canonical transport for the target's trust level
+# (ostree-remote-registry:fedora: for the images signed via the pre-configured
+# "fedora" ostree remote, ostree-unverified-registry: for the rest).
 compute_target_image_ref() {
     local current_ref="$1" target="$2"
 

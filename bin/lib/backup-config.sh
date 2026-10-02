@@ -58,6 +58,7 @@ idle_lock=""
 idle_delay=""
 key_repeat_delay=""
 key_repeat_interval=""
+terminal_cmd=""
 
 # Reads org.gnome.desktop.interface color-scheme/accent-color via gsettings.
 # Shared by Silverblue, Budgie, and (interface-only) Sway, since all three
@@ -144,7 +145,30 @@ capture_gnome_session_daemon_settings() {
     repeat_interval="$(gsettings get org.gnome.desktop.peripherals.keyboard repeat-interval 2>/dev/null || true)"
     repeat_interval="${repeat_interval#uint32 }"
     [[ -n "${repeat_interval}" ]] && key_repeat_interval="${repeat_interval}"
-    [[ -n "${key_repeat_delay}" || -n "${key_repeat_interval}" ]] && log "${label} keyboard repeat: delay=${key_repeat_delay:-unset}ms interval=${key_repeat_interval:-unset}ms"
+    if [[ -n "${key_repeat_delay}" || -n "${key_repeat_interval}" ]]; then
+        log "${label} keyboard repeat: delay=${key_repeat_delay:-unset}ms interval=${key_repeat_interval:-unset}ms"
+    fi
+}
+
+# Records the binary name of the user's preferred terminal. The gsettings key
+# is marked deprecated by GNOME and its schema default is "gnome-terminal"
+# even where another terminal is in actual use, so this is only a hint that
+# restore-config.sh verifies against what is installed on the target.
+capture_gnome_terminal() {
+    local label="$1" raw name
+    if ! command -v gsettings >/dev/null 2>&1; then
+        return
+    fi
+
+    raw="$(gsettings get org.gnome.desktop.default-applications.terminal exec 2>/dev/null || true)"
+    raw="${raw#\'}"
+    raw="${raw%\'}"
+    if name="$(terminal_command_name "${raw}")"; then
+        terminal_cmd="${name}"
+        log "${label} terminal hint: ${terminal_cmd}"
+    else
+        warn "Could not determine a usable ${label} terminal command."
+    fi
 }
 
 xdg="${XDG_CURRENT_DESKTOP:-}"
@@ -156,6 +180,7 @@ if [[ "${xdg}" == *Budgie* ]]; then
     source_desktop="budgie"
     capture_gnome_interface "Budgie"
     capture_gnome_session_daemon_settings "Budgie"
+    capture_gnome_terminal "Budgie"
     warn "Budgie has no confirmed wallpaper gsettings key; not captured (set it manually after switching)."
 
 elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
@@ -224,10 +249,21 @@ elif [[ "${xdg}" == *KDE* || -n "${KDE_FULL_SESSION:-}" ]]; then
     fi
     [[ -n "${key_repeat_delay}" || -n "${key_repeat_interval}" ]] && log "KDE keyboard repeat: delay=${key_repeat_delay:-unset}ms interval=${key_repeat_interval:-unset}ms"
 
+    terminal_raw="$(kde_read_config --file kdeglobals --group General --key TerminalApplication)"
+    if [[ -n "${terminal_raw}" ]]; then
+        if terminal_name="$(terminal_command_name "${terminal_raw}")"; then
+            terminal_cmd="${terminal_name}"
+            log "KDE terminal hint: ${terminal_cmd}"
+        else
+            warn "Could not derive a usable terminal name from KDE's TerminalApplication."
+        fi
+    fi
+
 elif [[ "${xdg}" == *GNOME* ]]; then
     source_desktop="silverblue"
     capture_gnome_interface "GNOME"
     capture_gnome_session_daemon_settings "GNOME"
+    capture_gnome_terminal "GNOME"
 
     avatar_path="$(accountsservice_icon_file || true)"
     if [[ -n "${avatar_path}" ]]; then
@@ -307,6 +343,7 @@ write_setting IDLE_LOCK "${idle_lock}"
 write_setting IDLE_DELAY_SECONDS "${idle_delay}"
 write_setting KEY_REPEAT_DELAY_MS "${key_repeat_delay}"
 write_setting KEY_REPEAT_INTERVAL_MS "${key_repeat_interval}"
+write_setting TERMINAL_CMD "${terminal_cmd}"
 
 log "Backup written to ${backup_dir}"
 printf '%s\n' "${backup_dir}"
