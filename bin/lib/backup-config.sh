@@ -7,6 +7,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 require_not_root
 
+# The snapshots (dconf dump, flatpak list, rpm-ostree status) describe the
+# whole desktop setup, so every file created below is owner-only.
+umask 077
+
 backup_dir="$(new_backup_dir)"
 
 if command -v dconf >/dev/null 2>&1; then
@@ -108,7 +112,7 @@ capture_gnome_session_daemon_settings() {
     sources="$(gsettings get org.gnome.desktop.input-sources sources 2>/dev/null || true)"
     if [[ -n "${sources}" ]] && command -v grep >/dev/null 2>&1; then
         local layouts
-        layouts="$(grep -oP "(?<='xkb', ')[^']*" <<<"${sources}" 2>/dev/null | cut -d'+' -f1 | paste -sd',' - || true)"
+        layouts="$(grep -oE "'xkb', '[^']+'" <<<"${sources}" 2>/dev/null | sed "s/^'xkb', '//; s/'\$//" | cut -d'+' -f1 | paste -sd',' - || true)"
         if [[ -n "${layouts}" ]]; then
             input_layouts="${layouts}"
             log "${label} keyboard layout(s): ${input_layouts}"
@@ -272,23 +276,37 @@ fi
 [[ -n "${source_desktop}" ]] && log "Detected desktop: ${source_desktop}"
 
 settings_file="${backup_dir}/settings.env"
-: > "${settings_file}"
-[[ -n "${source_desktop}" ]] && printf 'SOURCE_DESKTOP=%s\n' "${source_desktop}" >> "${settings_file}"
-[[ -n "${dark_mode}" ]] && printf 'DARK_MODE=%s\n' "${dark_mode}" >> "${settings_file}"
-[[ -n "${wallpaper_path}" ]] && printf 'WALLPAPER_PATH=%q\n' "${wallpaper_path}" >> "${settings_file}"
+
+# Values are written literally, one KEY=value per line, with no shell quoting:
+# restore-config.sh parses the file instead of executing it. A value that
+# would span lines can't be represented, so it is dropped with a warning.
+write_setting() {
+    local key="$1" value="$2"
+    [[ -n "${value}" ]] || return 0
+    if [[ "${value}" == *$'\n'* ]]; then
+        warn "Not recording ${key}: value contains a newline."
+        return 0
+    fi
+    printf '%s=%s\n' "${key}" "${value}" >> "${settings_file}"
+}
+
+printf '%s\n' "${SETTINGS_FORMAT_HEADER}" > "${settings_file}"
+write_setting SOURCE_DESKTOP "${source_desktop}"
+write_setting DARK_MODE "${dark_mode}"
+write_setting WALLPAPER_PATH "${wallpaper_path}"
 # Reference only: AVATAR_PATH lives under /var/lib/AccountsService, which
 # survives a rebase untouched (like /var/lib/flatpak), and GNOME/KDE both
 # already read it from the same AccountsService property — so
 # restore-config.sh has nothing to apply here. See config-map/README.md.
-[[ -n "${avatar_path}" ]] && printf 'AVATAR_PATH=%q\n' "${avatar_path}" >> "${settings_file}"
-[[ -n "${accent_color}" ]] && printf 'ACCENT_COLOR=%s\n' "${accent_color}" >> "${settings_file}"
-[[ -n "${input_layouts}" ]] && printf 'INPUT_LAYOUTS=%s\n' "${input_layouts}" >> "${settings_file}"
-[[ -n "${night_light}" ]] && printf 'NIGHT_LIGHT=%s\n' "${night_light}" >> "${settings_file}"
-[[ -n "${night_light_temp}" ]] && printf 'NIGHT_LIGHT_TEMP=%s\n' "${night_light_temp}" >> "${settings_file}"
-[[ -n "${idle_lock}" ]] && printf 'IDLE_LOCK=%s\n' "${idle_lock}" >> "${settings_file}"
-[[ -n "${idle_delay}" ]] && printf 'IDLE_DELAY_SECONDS=%s\n' "${idle_delay}" >> "${settings_file}"
-[[ -n "${key_repeat_delay}" ]] && printf 'KEY_REPEAT_DELAY_MS=%s\n' "${key_repeat_delay}" >> "${settings_file}"
-[[ -n "${key_repeat_interval}" ]] && printf 'KEY_REPEAT_INTERVAL_MS=%s\n' "${key_repeat_interval}" >> "${settings_file}"
+write_setting AVATAR_PATH "${avatar_path}"
+write_setting ACCENT_COLOR "${accent_color}"
+write_setting INPUT_LAYOUTS "${input_layouts}"
+write_setting NIGHT_LIGHT "${night_light}"
+write_setting NIGHT_LIGHT_TEMP "${night_light_temp}"
+write_setting IDLE_LOCK "${idle_lock}"
+write_setting IDLE_DELAY_SECONDS "${idle_delay}"
+write_setting KEY_REPEAT_DELAY_MS "${key_repeat_delay}"
+write_setting KEY_REPEAT_INTERVAL_MS "${key_repeat_interval}"
 
 log "Backup written to ${backup_dir}"
 printf '%s\n' "${backup_dir}"

@@ -77,8 +77,7 @@ IDLE_LOCK=""
 IDLE_DELAY_SECONDS=""
 KEY_REPEAT_DELAY_MS=""
 KEY_REPEAT_INTERVAL_MS=""
-# shellcheck source=/dev/null
-source "${settings_file}"
+load_settings_file "${settings_file}"
 log "Settings were captured on: ${SOURCE_DESKTOP:-unknown desktop}"
 
 applied=()
@@ -483,6 +482,8 @@ if ((${#skipped[@]})); then
 fi
 
 manual_steps_file="${from_dir}/MANUAL-STEPS.txt"
+: > "${manual_steps_file}"
+chmod 600 "${manual_steps_file}"
 {
     printf 'Rebase: %s -> %s\n\n' "${SOURCE_DESKTOP:-unknown}" "${target_desktop}"
     printf 'Automatically applied this run: %s\n' "${applied_str}"

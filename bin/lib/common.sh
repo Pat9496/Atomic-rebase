@@ -48,21 +48,127 @@ BACKUP_ROOT="${HOME}/.local/share/atomic-rebase/backups"
 new_backup_dir() {
     local dir
     dir="${BACKUP_ROOT}/$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "${dir}"
+    (umask 077 && mkdir -p "${BACKUP_ROOT}" "${dir}")
+    # mkdir -p leaves a pre-existing directory's mode alone, so tighten it
+    # explicitly in case an older version of this tool created it as 755.
+    chmod 700 "${BACKUP_ROOT}" "${dir}"
     printf '%s\n' "${dir}"
 }
 
+# Backup directories are named YYYYmmdd-HHMMSS, so a plain name sort is
+# chronological. Sorting by mtime instead would pick whichever directory was
+# touched last (e.g. when MANUAL-STEPS.txt is written during a restore), not
+# the newest backup.
 latest_backup_dir() {
-    local dir=""
+    local name="" dir=""
     if [[ -d "${BACKUP_ROOT}" ]]; then
-        dir="$(find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
-            | sort -rn | head -n1 | cut -d' ' -f2-)"
+        name="$(find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d \
+            -regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{6}' -printf '%f\n' 2>/dev/null \
+            | sort | tail -n1)"
     fi
-    if [[ -z "${dir}" ]]; then
+    if [[ -z "${name}" ]]; then
         err "No backups found under ${BACKUP_ROOT}."
         return 1
     fi
+    dir="${BACKUP_ROOT}/${name}"
     printf '%s\n' "${dir}"
+}
+
+readonly SETTINGS_FORMAT_HEADER="# atomic-rebase settings format 2"
+readonly SETTINGS_KEYS=(
+    SOURCE_DESKTOP DARK_MODE WALLPAPER_PATH AVATAR_PATH ACCENT_COLOR
+    INPUT_LAYOUTS NIGHT_LIGHT NIGHT_LIGHT_TEMP IDLE_LOCK IDLE_DELAY_SECONDS
+    KEY_REPEAT_DELAY_MS KEY_REPEAT_INTERVAL_MS
+)
+
+# Decodes a value written by older versions of backup-config.sh, which used
+# printf %q for WALLPAPER_PATH/AVATAR_PATH. Only the backslash-escaped form
+# (what %q emits for spaces and shell metacharacters) is understood; the
+# $'...' form %q uses for control characters is refused rather than evaluated.
+decode_legacy_quoted_value() {
+    local raw="$1" out="" i ch
+    if [[ "${raw}" == \$\'* ]]; then
+        return 1
+    fi
+    for ((i = 0; i < ${#raw}; i++)); do
+        ch="${raw:i:1}"
+        if [[ "${ch}" == "\\" ]]; then
+            i=$((i + 1))
+            ch="${raw:i:1}"
+        fi
+        out+="${ch}"
+    done
+    printf '%s' "${out}"
+}
+
+# Returns 0 if the value is acceptable for the given settings key. Values end
+# up as arguments to gsettings/kwriteconfig6/plasma-apply-*, and INPUT_LAYOUTS
+# is also interpolated into a GVariant string, so each key is held to the
+# narrowest shape it can legitimately have.
+settings_value_is_valid() {
+    local key="$1" value="$2"
+    case "${key}" in
+        SOURCE_DESKTOP) [[ "${value}" =~ ^[a-z]+$ ]] ;;
+        DARK_MODE|NIGHT_LIGHT|IDLE_LOCK) [[ "${value}" == "true" || "${value}" == "false" ]] ;;
+        ACCENT_COLOR) [[ "${value}" =~ ^[a-z]+$ ]] ;;
+        INPUT_LAYOUTS) [[ "${value}" =~ ^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*$ ]] ;;
+        NIGHT_LIGHT_TEMP|IDLE_DELAY_SECONDS|KEY_REPEAT_DELAY_MS|KEY_REPEAT_INTERVAL_MS)
+            [[ "${value}" =~ ^[0-9]+$ ]] ;;
+        WALLPAPER_PATH|AVATAR_PATH) [[ -n "${value}" && "${value}" != -* ]] ;;
+        *) return 1 ;;
+    esac
+}
+
+# Reads a settings.env file into the global variables named by
+# SETTINGS_KEYS without executing anything from it. Each line is split at the
+# first "=", the key must be on the whitelist, and the value is taken
+# literally. Unknown keys and values that fail validation are skipped with a
+# warning. Files without SETTINGS_FORMAT_HEADER come from older versions that
+# wrote WALLPAPER_PATH/AVATAR_PATH shell-quoted, so those two are decoded.
+load_settings_file() {
+    local file="$1" line key value known recognized legacy=1 first=1
+
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        if ((first)); then
+            first=0
+            if [[ "${line}" == "${SETTINGS_FORMAT_HEADER}" ]]; then
+                legacy=0
+                continue
+            fi
+        fi
+        [[ -z "${line}" || "${line}" == \#* ]] && continue
+        if [[ "${line}" != *=* ]]; then
+            warn "Ignoring malformed line in ${file}."
+            continue
+        fi
+        key="${line%%=*}"
+        value="${line#*=}"
+
+        recognized=0
+        for known in "${SETTINGS_KEYS[@]}"; do
+            if [[ "${key}" == "${known}" ]]; then
+                recognized=1
+                break
+            fi
+        done
+        if ((!recognized)); then
+            warn "Ignoring unknown key in ${file}: ${key}"
+            continue
+        fi
+
+        if ((legacy)) && [[ "${key}" == WALLPAPER_PATH || "${key}" == AVATAR_PATH ]]; then
+            if ! value="$(decode_legacy_quoted_value "${value}")"; then
+                warn "Ignoring ${key} in ${file}: unsupported legacy quoting."
+                continue
+            fi
+        fi
+
+        if ! settings_value_is_valid "${key}" "${value}"; then
+            warn "Ignoring ${key} in ${file}: value is not valid for this setting."
+            continue
+        fi
+        printf -v "${key}" '%s' "${value}"
+    done < "${file}"
 }
 
 # Fedora Atomic Desktop image catalog: desktop name -> registry/path/image-name
@@ -154,27 +260,48 @@ desktop_from_image_ref() {
 # tag: their major-version tags (e.g. "43", "44", "45") get re-pushed on every
 # new build, and whichever numeric tag is currently also tagged "rawhide"
 # hasn't stabilized yet. That one is excluded; the next-highest is returned.
+#
+# The "rawhide" tag is looked up on its own with specificTag instead of being
+# searched for in the tag listing: these repositories hold thousands of tags
+# (every build plus a .sig tag per digest, ~60 pages at limit=100), so the
+# first page does not reliably contain it (it is missing for cosmic-atomic),
+# and walking every page for one tag would be slow and fragile. The numeric
+# major-version tags are re-pushed on every build and so stay on the first
+# page of the listing, which is newest-first.
+quay_api_get() {
+    curl -fsSL --connect-timeout 10 -m 30 --retry 2 "$1" 2>/dev/null
+}
+
 latest_stable_tag_for_image() {
-    local image_path="$1" repo_path tags_json rawhide_digest tag
+    local image_path="$1" repo_path base_url tags_json rawhide_json rawhide_digest tag
 
     require_cmd curl
     require_cmd jq
 
     repo_path="${image_path#quay.io/}"
+    base_url="https://quay.io/api/v1/repository/${repo_path}/tag/?onlyActiveTags=true"
 
-    tags_json="$(curl -fsSL "https://quay.io/api/v1/repository/${repo_path}/tag/?onlyActiveTags=true&limit=100" 2>/dev/null)" || {
+    tags_json="$(quay_api_get "${base_url}&limit=100")" || {
         err "Failed to query quay.io for tags of ${image_path}."
         return 1
     }
 
-    rawhide_digest="$(jq -r '[.tags[] | select(.name=="rawhide")][0].manifest_digest // empty' <<<"${tags_json}" 2>/dev/null)"
+    rawhide_json="$(quay_api_get "${base_url}&specificTag=rawhide")" || {
+        err "Failed to query quay.io for the rawhide tag of ${image_path}."
+        return 1
+    }
+
+    rawhide_digest="$(jq -r '[.tags[] | select(.name=="rawhide")][0].manifest_digest // empty' <<<"${rawhide_json}" 2>/dev/null)" || {
+        err "Unexpected response from quay.io for the rawhide tag of ${image_path}."
+        return 1
+    }
 
     tag="$(jq -r --arg rh "${rawhide_digest}" '
         [.tags[] | select(.name | test("^[0-9]+$"))
                  | select($rh == "" or .manifest_digest != $rh)
                  | (.name | tonumber)]
         | max // empty
-    ' <<<"${tags_json}" 2>/dev/null)"
+    ' <<<"${tags_json}" 2>/dev/null)" || tag=""
 
     if [[ -z "${tag}" || "${tag}" == "null" ]]; then
         err "Could not determine the most recent stable version tag for ${image_path} from quay.io."

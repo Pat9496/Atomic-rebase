@@ -55,9 +55,10 @@ switch to a different base image on their own.
 
 - **Known-safe packages** — a small curated allowlist of desktop-agnostic
   CLI tools with no GUI/desktop-specific integration (`alacritty`, `btop`,
-  `chezmoi`, `fastfetch`, `gh`, `htop`, `neovim`, `tmux`, plus any `git` or
-  `git-*` package such as `git-lfs`) — are offered back with a single
-  `confirm` prompt (`-y`/`--yes`/`ASSUME_YES` to skip it) and, if accepted,
+  `chezmoi`, `cmatrix`, `distrobox`, `fastfetch`, `gh`, `htop`, `neovim`,
+  `podman-compose`, `rpmdevtools`, `tmux`, `vim-enhanced`, `xclip`,
+  `xdotool`, `xsel`, plus any `git` or `git-*` package such as `git-lfs`) —
+  are offered back with a single `confirm` prompt (`-y`/`--yes`/`ASSUME_YES` to skip it) and, if accepted,
   re-layered with `sudo rpm-ostree install --idempotent -y <packages>`. Like
   the rebase itself, this takes effect on the next reboot.
 - **Everything else** (e.g. GUI apps, desktop-specific packages, or the
