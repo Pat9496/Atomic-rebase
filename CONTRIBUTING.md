@@ -75,5 +75,5 @@ tools, COSMIC's config files), so validation is manual:
 ## Reporting bugs / requesting features
 
 Use the issue templates under **Issues → New Issue**. For security
-vulnerabilities, see [`SECURITY.md`](SECURITY.md) instead of opening a
-public issue.
+vulnerabilities, use the repository's Security tab → **Report a vulnerability**
+instead of opening a public issue.

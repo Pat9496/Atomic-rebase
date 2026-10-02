@@ -103,7 +103,7 @@ Neustart durchführen, und es geht zurück auf das vorherige Image unverändert.
 
 ## Beitragen
 
-Fehlerberichte, Funktionsanfragen und Pull-Anfragen sind willkommen — Details zu Codierungsstil und Testverfahren finden sich in [`CONTRIBUTING.md`](CONTRIBUTING.md). Sicherheitsprobleme sollten privat gemäß [`SECURITY.md`](SECURITY.md) gemeldet werden, anstatt als öffentliche Probleme eingereicht zu werden.
+Fehlerberichte, Funktionsanfragen und Pull-Anfragen sind willkommen — Details zu Codierungsstil und Testverfahren finden sich in [`CONTRIBUTING.md`](CONTRIBUTING.md). Sicherheitsprobleme sollten privat über die private Schwachstellenberichterstattung von GitHub (Registerkarte Security → Report a vulnerability) gemeldet werden, anstatt als öffentliche Probleme eingereicht zu werden.
 
 ## Danksagungen
 

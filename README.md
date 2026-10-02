@@ -173,8 +173,8 @@ reboot, and you're back on the prior image untouched.
 
 Bug reports, feature requests, and pull requests are welcome — see
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for coding style and how to test
-changes. Security issues should be reported privately per
-[`SECURITY.md`](SECURITY.md) rather than filed as public issues.
+changes. Security issues should be reported privately via the repository's
+Security tab → **Report a vulnerability**, not as public issues.
 
 ## Credits
 
