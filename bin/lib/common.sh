@@ -255,7 +255,7 @@ get_current_image_ref() {
 # Identifies which known Fedora Atomic Desktop image a full image reference
 # belongs to, by checking whether the reference contains one of the registry
 # paths in DESKTOP_IMAGE. This deliberately avoids parsing the transport
-# prefix (ostree-remote-registry:fedora:, ostree-unverified-registry:,
+# prefix (ostree-image-signed:docker://, ostree-unverified-registry:,
 # docker://, oci://, @sha256: digest pins, ...) since rpm-ostree accepts many
 # equivalent forms for the same image and the registry path substring is the
 # part that reliably identifies which desktop is booted.
@@ -353,8 +353,8 @@ latest_stable_tag_for_image() {
 # only numeric major-version tags, so latest_stable_tag_for_image uses the
 # current stable Fedora release number (from Bodhi) as the tag. Also picks
 # the canonical transport for the target's trust level
-# (ostree-remote-registry:fedora: for the images signed via the pre-configured
-# "fedora" ostree remote, ostree-unverified-registry: for the rest).
+# (ostree-image-signed:docker:// for the images with sigstore signatures
+# verified through the host policy, ostree-unverified-registry: for the rest).
 compute_target_image_ref() {
     local current_ref="$1" target="$2"
 
@@ -371,7 +371,7 @@ compute_target_image_ref() {
     fi
 
     if [[ "${DESKTOP_OFFICIAL[$target]}" == "1" ]]; then
-        printf 'ostree-remote-registry:fedora:%s:latest\n' "${DESKTOP_IMAGE[$target]}"
+        printf 'ostree-image-signed:docker://%s:latest\n' "${DESKTOP_IMAGE[$target]}"
     else
         local tag
         tag="$(latest_stable_tag_for_image "${DESKTOP_IMAGE[$target]}")" || return 1

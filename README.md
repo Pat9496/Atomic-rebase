@@ -96,7 +96,7 @@ isn't migrated, and how confident each mechanism is per desktop.
   reference and can't compute a rebase target from a plain ostree ref. Check
   with `rpm-ostree status`; if you're on the ostree remote, first rebase to
   your current desktop's container image (e.g.
-  `sudo rpm-ostree rebase ostree-remote-registry:fedora:quay.io/fedora/fedora-silverblue:<version>`)
+  `sudo rpm-ostree rebase ostree-image-signed:docker://quay.io/fedora/fedora-silverblue:<version>`)
   before using `Atomic-rebase.sh`.
 - Run as your normal user, not root — the scripts elevate with `sudo`
   internally only for the `rpm-ostree rebase` step itself, and for
