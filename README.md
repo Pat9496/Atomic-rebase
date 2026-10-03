@@ -107,7 +107,7 @@ isn't migrated, and how confident each mechanism is per desktop.
 ## Usage
 
 ```bash
-./Atomic-rebase.sh --to <silverblue|kinoite|budgie|sway|cosmic>
+./Atomic-rebase.sh --to <silverblue|kinoite|budgie|sway|cosmic> [--no-migrate] [-y|--yes] [--dry-run]
 ```
 
 This detects your current desktop from the booted image, computes the
@@ -115,6 +115,7 @@ target image (always the latest stable release of the destination desktop,
 regardless of what tag/digest the current image is on), and walks you
 through the rest. Useful flags:
 
+- `--no-migrate` — rebase without backing up settings. Afterwards there is nothing to restore, except for Sway: you can run `bin/lib/restore-config.sh --to sway --no-migrate` to be asked a few setup questions (see below).
 - `--dry-run` — print what would happen without changing anything.
 - `-y`/`--yes` — skip the confirmation prompt.
 
@@ -130,35 +131,46 @@ The script:
 
 1. Detects your current image and desktop, and computes the target as the
    destination desktop's own latest stable release.
-2. Runs `bin/lib/backup-config.sh` to snapshot current settings under
+2. If `--no-migrate` is not set, runs `bin/lib/backup-config.sh` to snapshot current settings under
    `~/.local/share/atomic-rebase/backups/<timestamp>/`. Backup directories
    are created with mode 700, and `settings.env` is a literal `KEY=value`
    file that `restore-config.sh` parses using a key whitelist and never
-   sources directly.
+   sources directly. If `--no-migrate` is set, this step is skipped.
 3. Prints the exact target image and warns if it's a community-maintained,
    unverified image, then asks for confirmation before doing anything (skip
    the prompt with `-y`; preview only with `--dry-run`).
 4. Runs `rpm-ostree rebase` (via `sudo`) to stage the new deployment.
-5. Tells you to reboot, and to run `bin/lib/restore-config.sh` afterwards.
+5. Tells you to reboot. If a backup was created, tells you to run `bin/lib/restore-config.sh` afterwards. If `--no-migrate` was used with Sway, tells you to run `bin/lib/restore-config.sh --to sway --no-migrate` to be asked setup questions.
 
 After rebooting into the new desktop:
 
 ```bash
-bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic>
+bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic> [--from <backup-dir> | --no-migrate] [--fresh-sway-config] [-y|--yes]
 ```
 
-For Sway, add `--fresh-sway-config` to move an existing
-`~/.config/sway/config` aside (as `config.bak-<timestamp>`, never deleted)
-so sway starts from Fedora's default config plus the generated drop-in.
+- `--from <backup-dir>` — restore from a specific backup directory (by default, the most recent is used). Cannot be combined with `--no-migrate`.
+- `--no-migrate` — for Sway only. Ask interactive setup questions instead of reading a backup. Cannot be combined with `--from`.
+- `--fresh-sway-config` — for Sway only. Move an existing `~/.config/sway/config` aside (as `config.bak-<timestamp>`, never deleted) so sway starts from Fedora's default config plus the generated drop-in.
+- `-y`/`--yes` — skip confirmation prompts and non-interactive setup questions.
 
-This re-applies the settings captured in step 2 that have a known
-equivalent in the new desktop. It also offers to re-layer any ostree-layered
+This re-applies the settings captured in the backup that have a known
+equivalent in the new desktop. With `--no-migrate`, no backup is read; instead
+(Sway only), when run in a terminal without `-y`, it asks a few setup questions:
+
+- Keyboard layout(s), with the captured value (if any) as the default; empty answer skips.
+- Keyboard variant(s), one per layout and comma-separated; empty skips.
+- Display scaling factor for all outputs (0.5–4); empty keeps Sway's automatic default.
+- Touchpad tap-to-click and natural (reversed) scrolling; empty skips each.
+- GTK dark mode (only asked if not captured from the source desktop); empty skips.
+
+These answers are written into the generated Sway drop-in (see below). With `-y` or non-interactive stdin, questions are skipped entirely.
+
+The script also offers to re-layer any ostree-layered
 RPM packages (`rpm-ostree install`) from a small allowlist of common,
 desktop-agnostic CLI tools (alacritty, btop, chezmoi, cmatrix, distrobox,
 fastfetch, gh, htop, neovim, podman-compose, rpmdevtools, tmux,
 vim-enhanced, xclip, xdotool, xsel, and any `git`/`git-*` package) that were
-layered on the old desktop — confirm once (or pass `-y`/`--yes` to skip the
-prompt) and it re-layers them via `sudo`, taking effect on next reboot.
+layered on the old desktop — but only if a backup was read (not with `--no-migrate`). Confirm once (or pass `-y`/`--yes` to skip the prompt) and it re-layers them via `sudo`, taking effect on next reboot.
 Anything else layered — including hardware-specific drivers/akmods
 (e.g. `xorg-x11-drv-nvidia`, `akmod-nvidia`) and the virtualization stack
 (`libvirt`, `qemu-kvm`, `virt-install`, `swtpm`, `edk2-ovmf`), which are
@@ -167,11 +179,11 @@ unattended — is left for you to reinstall manually. It writes a `MANUAL-STEPS.
 next to the backup listing what was and wasn't migrated this run (panel/dock
 layout, keyboard shortcuts, default app associations, desktop
 extensions/widgets, and similar desktop-specific setup are always manual —
-see [`config-map/README.md`](config-map/README.md)).
+see [`config-map/README.md`](config-map/README.md)). With `--no-migrate`, no `MANUAL-STEPS.txt` is written.
 
 ### Sway as a restore target
 
-When restoring to Sway, the generated drop-in at `~/.config/sway/config.d/99-atomic-rebase.conf` (mode 600) carries keyboard layouts, key repeat, wallpaper, GTK dark mode/accent color, and terminal preference. Your main `~/.config/sway/config` is never created or modified; if you have one, it must include `config.d/*.conf` or `restore-config.sh` will warn and add the line to `MANUAL-STEPS.txt`. Existing `99-atomic-rebase.conf` files not generated by this tool are never overwritten. Changes reload automatically if `swaymsg reload` is available and Sway is running; otherwise they take effect on next start/reload. The terminal is applied only if that binary exists on the new system; otherwise Fedora's default `foot` is left unchanged.
+When restoring to Sway, the generated drop-in at `~/.config/sway/config.d/99-atomic-rebase.conf` (mode 600) carries keyboard layouts, keyboard variants, display scaling, touchpad settings, key repeat, wallpaper, GTK dark mode/accent color, and terminal preference. Values come either from the backup (if one was read) or from the interactive setup questions (if using `--no-migrate` and running in a terminal without `-y`). Your main `~/.config/sway/config` is never created or modified; if you have one, it must include `config.d/*.conf` or `restore-config.sh` will warn and add the line to `MANUAL-STEPS.txt`. Existing `99-atomic-rebase.conf` files not generated by this tool are never overwritten. Changes reload automatically if `swaymsg reload` is available and Sway is running; otherwise they take effect on next start/reload. The terminal is applied only if that binary exists on the new system; otherwise Fedora's default `foot` is left unchanged.
 
 ## Rolling back
 

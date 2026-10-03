@@ -59,13 +59,14 @@ Diese Skripte sichern einen Snapshot der aktuellen Einstellungen zur Referenz un
 ## Verwendung
 
 ```bash
-./Atomic-rebase.sh --to <silverblue|kinoite|budgie|sway|cosmic>
+./Atomic-rebase.sh --to <silverblue|kinoite|budgie|sway|cosmic> [--no-migrate]
 ```
 
 Dies erkennt den aktuellen Desktop aus dem gestarteten Image, berechnet das Ziel-Image (immer das neueste stabile Release des Ziel-Desktops, unabhängig davon, auf welchem Tag/Digest sich das aktuelle Image befindet) und führt durch den Rest. Nützliche Flags:
 
 - `--dry-run` — gibt aus, was passieren würde, ohne etwas zu ändern.
 - `-y`/`--yes` — überspringt die Bestätigungsaufforderung.
+- `--no-migrate` — führt den Rebase durch, ohne Einstellungen zu sichern. Danach ist nichts wiederherzustellen, außer bei Sway: dort können die Schritte mittels `bin/lib/restore-config.sh --to sway --no-migrate` durchgeführt werden.
 
 ```bash
 # Von einem beliebigen Atomic Desktop zu Kinoite wechseln
@@ -86,16 +87,31 @@ Das Skript:
 Nach dem Neustart in den neuen Desktop:
 
 ```bash
-bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic>
+bin/lib/restore-config.sh --to <silverblue|kinoite|budgie|sway|cosmic> [--no-migrate]
 ```
 
-Für Sway verschiebt `--fresh-sway-config` eine vorhandene `~/.config/sway/config` beiseite (als `config.bak-<timestamp>`, nie gelöscht), sodass Sway mit Fedoras Standardkonfiguration plus dem erzeugten Drop-in startet.
+Für Sway stehen zusätzliche Flags zur Verfügung:
+- `--fresh-sway-config` verschiebt eine vorhandene `~/.config/sway/config` beiseite (als `config.bak-<timestamp>`, nie gelöscht), sodass Sway mit Fedoras Standardkonfiguration plus dem erzeugten Drop-in startet.
+- `--no-migrate` wird nur mit `--to sway` verwendet und stellt Einstellungen bereit, ohne ein Backup zu lesen oder `MANUAL-STEPS.txt` zu schreiben. Im `--no-migrate`-Modus werden auch keine Pakete neu geschichtet.
 
 Dies wendet die in Schritt 2 erfassten Einstellungen erneut an, die eine bekannte Entsprechung im neuen Desktop haben: dunkler/heller Modus, Hintergrundbild, Akzentfarbe, Tastaturlayouts, Nachtlicht, Bildschirmsperre, Tastenwiederholung und Standard-Terminal (sofern verfügbar). Für Sway wird dazu eine erzeugte Datei `~/.config/sway/config.d/99-atomic-rebase.conf` geschrieben, die diese Einstellungen persistent speichert. Es bietet auch an, alle ostree-geschichteten RPM-Pakete (`rpm-ostree install`) aus einer kleinen Zulassungsliste von bekannten, desktop-agnostischen CLI-Tools (alacritty, btop, chezmoi, cmatrix, distrobox, fastfetch, gh, htop, neovim, podman-compose, rpmdevtools, tmux, vim-enhanced, xclip, xdotool, xsel und alle `git`/`git-*`-Pakete) neu zu schichten, die auf dem alten Desktop geschichtet waren — einmal bestätigen (oder `-y`/`--yes` übergeben, um die Aufforderung zu überspringen) und es schichtet sie über `sudo` erneut, wirksam beim nächsten Neustart. Alles andere Geschichtete — einschließlich hardwarespezifischer Treiber/akmods (z. B. `xorg-x11-drv-nvidia`, `akmod-nvidia`) und des Virtualisierungs-Stacks (`libvirt`, `qemu-kvm`, `virt-install`, `swtpm`, `edk2-ovmf`), das kernelversions- oder hardwaregekoppelt ist und zu bedeutsam zum unbeaufsichtigten Neuinstallieren — wird zur manuellen Neuinstallation überlassen. Es schreibt eine `MANUAL-STEPS.txt` neben der Sicherung, die auflistet, was in diesem Durchlauf migriert wurde und was nicht (Panel/Dock-Layout, Tastaturkürzel, Standard-App-Zuordnungen, Desktop-Erweiterungen/Widgets und ähnliches Desktop-spezifisches Setup sind immer manuell — siehe [`config-map/README.md`](config-map/README.md)).
 
 ### Sway als Restore-Ziel
 
 Beim Wiederherstellen auf Sway enthält das erzeugte Drop-in unter `~/.config/sway/config.d/99-atomic-rebase.conf` (Modus 600) Tastaturlayouts, Tastenwiederholung, Hintergrundbild, GTK-Dunkelmodus/Akzentfarbe und Terminal-Einstellung. Die Hauptdatei `~/.config/sway/config` wird niemals erstellt oder geändert. Falls vorhanden, muss sie `config.d/*.conf` einbinden, ansonsten wird `restore-config.sh` warnen und die Zeile zu `MANUAL-STEPS.txt` hinzufügen. Bestehende `99-atomic-rebase.conf`-Dateien, die nicht von diesem Tool erzeugt wurden, werden niemals überschrieben. Änderungen werden automatisch neu geladen, falls `swaymsg reload` verfügbar ist und Sway läuft; ansonsten wirken sie beim nächsten Start/Neuladen. Das Terminal wird nur angewendet, falls die Binärdatei auf dem neuen System existiert; ansonsten bleibt Fedoras Standard `foot` unverändert.
+
+#### Interaktive Einrichtung für Sway
+
+Wird `restore-config.sh --to sway` ohne `-y` in einem Terminal ausgeführt, werden die folgenden Einstellungen interaktiv abgefragt (gilt für beide Modi: mit oder ohne `--no-migrate`):
+
+- **Tastaturlayout(s)** — erfasstes Layout aus dem alten Desktop wird als Vorgabe angeboten; mehrere Layouts können kommagetrennt angegeben werden.
+- **Tastaturvariante(n)** — falls gewünscht.
+- **Bildschirmskalierung** — von 0,5 bis 4, einzeln pro Output.
+- **Touchpad Tap-to-Click** — aktivieren oder deaktivieren.
+- **Touchpad natürliches Scrollen** — aktivieren oder deaktivieren.
+- **GTK-Dunkelmodus** — nur wenn nicht im Backup erfasst.
+
+Leere Antworten überspringen das betreffende Element. Die eingegebenen Werte werden im generierten Drop-in `~/.config/sway/config.d/99-atomic-rebase.conf` als `xkb_variant`, `output * scale <n>` und `input type:touchpad { tap ..., natural_scroll ... }` gespeichert. Wird `restore-config.sh` mit `-y` aufgerufen oder die Eingabe ist nicht interaktiv, entfallen alle Fragen.
 
 ## Rollback
 

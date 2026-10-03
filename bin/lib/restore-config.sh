@@ -8,13 +8,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 require_not_root
 
 usage() {
-    printf 'Usage: %s --to <%s> [--from <backup-dir>] [--fresh-sway-config] [-y|--yes]\n' \
+    printf 'Usage: %s --to <%s> [--from <backup-dir> | --no-migrate] [--fresh-sway-config] [-y|--yes]\n' \
         "$(basename "${BASH_SOURCE[0]}")" "$(known_desktops | paste -sd'|')" >&2
 }
 
 target_desktop=""
 from_dir=""
 fresh_sway_config=0
+no_migrate=0
 ASSUME_YES="${ASSUME_YES:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -31,6 +32,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --fresh-sway-config)
             fresh_sway_config=1
+            shift
+            ;;
+        --no-migrate)
+            no_migrate=1
             shift
             ;;
         -y|--yes)
@@ -60,20 +65,33 @@ if ((fresh_sway_config)) && [[ "${target_desktop}" != "sway" ]]; then
     exit 1
 fi
 
-if [[ -z "${from_dir}" ]]; then
+if ((no_migrate)); then
+    if [[ "${target_desktop}" != "sway" ]]; then
+        err "--no-migrate only applies with --to sway; for other targets there is nothing to restore without a backup."
+        exit 1
+    fi
+    if [[ -n "${from_dir}" ]]; then
+        err "--no-migrate and --from cannot be combined."
+        exit 1
+    fi
+fi
+
+if ((!no_migrate)) && [[ -z "${from_dir}" ]]; then
     from_dir="$(latest_backup_dir)"
 fi
 
-if [[ ! -d "${from_dir}" ]]; then
-    err "Backup directory not found: ${from_dir}"
-    exit 1
-fi
-log "Using backup: ${from_dir}"
+if ((!no_migrate)); then
+    if [[ ! -d "${from_dir}" ]]; then
+        err "Backup directory not found: ${from_dir}"
+        exit 1
+    fi
+    log "Using backup: ${from_dir}"
 
-settings_file="${from_dir}/settings.env"
-if [[ ! -f "${settings_file}" ]]; then
-    err "No settings.env found in ${from_dir}"
-    exit 1
+    settings_file="${from_dir}/settings.env"
+    if [[ ! -f "${settings_file}" ]]; then
+        err "No settings.env found in ${from_dir}"
+        exit 1
+    fi
 fi
 
 SOURCE_DESKTOP=""
@@ -88,8 +106,12 @@ IDLE_DELAY_SECONDS=""
 KEY_REPEAT_DELAY_MS=""
 KEY_REPEAT_INTERVAL_MS=""
 TERMINAL_CMD=""
-load_settings_file "${settings_file}"
-log "Settings were captured on: ${SOURCE_DESKTOP:-unknown desktop}"
+if ((no_migrate)); then
+    log "Not migrating any settings (--no-migrate)."
+else
+    load_settings_file "${settings_file}"
+    log "Settings were captured on: ${SOURCE_DESKTOP:-unknown desktop}"
+fi
 
 applied=()
 skipped=()
@@ -100,6 +122,10 @@ sway_dropin_lines=()
 sway_dropin_items=()
 sway_dropin_state="none"
 sway_tmp_file=""
+SWAY_KEYBOARD_VARIANT=""
+SWAY_OUTPUT_SCALE=""
+SWAY_TOUCHPAD_TAP=""
+SWAY_TOUCHPAD_NATURAL_SCROLL=""
 trap '[[ -z "${sway_tmp_file}" ]] || rm -f -- "${sway_tmp_file}"' EXIT
 
 # Sway reads the first main config it finds and never merges them, so the
@@ -152,12 +178,92 @@ sway_dropin_covers() {
     return 1
 }
 
+# Sway has no settings UI and these values are not captured from any other
+# desktop, so a first start with Fedora's defaults would come up with a US
+# layout, unscaled HiDPI outputs and a touchpad without tap-to-click. Asking
+# once here is what makes the switch usable without editing the config by hand.
+ask_text() {
+    local reply=""
+    read -r -p "$1 " reply || true
+    reply="${reply#"${reply%%[![:space:]]*}"}"
+    ask_reply="${reply%"${reply##*[![:space:]]}"}"
+}
+
+ask_yes_no_skip() {
+    local reply=""
+    while true; do
+        read -r -p "$1 [y/n/Enter=skip] " reply || reply=""
+        case "${reply}" in
+            [yY]|[yY][eE][sS]) ask_reply="true"; return 0 ;;
+            [nN]|[nN][oO]) ask_reply="false"; return 0 ;;
+            "") ask_reply=""; return 0 ;;
+            *) warn "Please answer y, n or press Enter to skip." ;;
+        esac
+    done
+}
+
+ask_sway_questions() {
+    local default_hint=""
+
+    if [[ "${ASSUME_YES}" == "1" || ! -t 0 ]]; then
+        log "Non-interactive run; skipping the Sway setup questions."
+        return 0
+    fi
+
+    log "A few questions to set up sway. Press Enter to keep the shown value or to skip."
+
+    default_hint=""
+    [[ -z "${INPUT_LAYOUTS}" ]] || default_hint=" [${INPUT_LAYOUTS}]"
+    while true; do
+        ask_text "Keyboard layout(s) as xkb names, comma-separated (e.g. us, ch, de, ch,de)${default_hint}:"
+        if [[ -z "${ask_reply}" ]] || settings_value_is_valid INPUT_LAYOUTS "${ask_reply}"; then
+            break
+        fi
+        warn "Use letters, digits, '_' and '-' only, separated by commas."
+    done
+    [[ -z "${ask_reply}" ]] || INPUT_LAYOUTS="${ask_reply}"
+
+    if [[ -n "${INPUT_LAYOUTS}" ]]; then
+        while true; do
+            ask_text "Keyboard variant(s), one per layout and comma-separated, empty for none (e.g. nodeadkeys for ch):"
+            if [[ -z "${ask_reply}" || "${ask_reply}" =~ ^[A-Za-z0-9_-]*(,[A-Za-z0-9_-]*)*$ ]]; then
+                break
+            fi
+            warn "Use letters, digits, '_' and '-' only, separated by commas."
+        done
+        SWAY_KEYBOARD_VARIANT="${ask_reply}"
+    fi
+
+    while true; do
+        ask_text "Display scaling factor for all outputs (e.g. 1, 1.25, 1.5, 2); empty keeps sway's automatic default:"
+        if [[ -z "${ask_reply}" ]]; then
+            break
+        fi
+        if [[ "${ask_reply}" =~ ^[0-9](\.[0-9]{1,2})?$ ]] && awk -v v="${ask_reply}" 'BEGIN { exit !(v >= 0.5 && v <= 4) }'; then
+            SWAY_OUTPUT_SCALE="${ask_reply}"
+            break
+        fi
+        warn "Enter a number between 0.5 and 4, e.g. 1.5."
+    done
+
+    ask_yes_no_skip "Touchpad: enable tap-to-click?"
+    SWAY_TOUCHPAD_TAP="${ask_reply}"
+    ask_yes_no_skip "Touchpad: enable natural (reversed) scrolling?"
+    SWAY_TOUCHPAD_NATURAL_SCROLL="${ask_reply}"
+
+    if [[ -z "${DARK_MODE}" ]]; then
+        ask_yes_no_skip "Use the dark color scheme for GTK apps?"
+        DARK_MODE="${ask_reply}"
+    fi
+}
+
 build_sway_dropin() {
     local keyboard_lines=() rate=""
 
     if [[ -n "${INPUT_LAYOUTS}" ]]; then
         if settings_value_is_valid INPUT_LAYOUTS "${INPUT_LAYOUTS}"; then
             keyboard_lines+=("    xkb_layout \"${INPUT_LAYOUTS}\"")
+            [[ -z "${SWAY_KEYBOARD_VARIANT}" ]] || keyboard_lines+=("    xkb_variant \"${SWAY_KEYBOARD_VARIANT}\"")
             sway_dropin_add_item "keyboard layout"
         else
             warn "Keyboard layout list is not safe to write into a sway config; skipping."
@@ -182,6 +288,23 @@ build_sway_dropin() {
     fi
     if ((${#keyboard_lines[@]})); then
         sway_dropin_lines+=("input type:keyboard {" "${keyboard_lines[@]}" "}")
+    fi
+
+    if [[ -n "${SWAY_TOUCHPAD_TAP}" || -n "${SWAY_TOUCHPAD_NATURAL_SCROLL}" ]]; then
+        local touchpad_lines=()
+        if [[ -n "${SWAY_TOUCHPAD_TAP}" ]]; then
+            touchpad_lines+=("    tap $([[ "${SWAY_TOUCHPAD_TAP}" == "true" ]] && echo enabled || echo disabled)")
+        fi
+        if [[ -n "${SWAY_TOUCHPAD_NATURAL_SCROLL}" ]]; then
+            touchpad_lines+=("    natural_scroll $([[ "${SWAY_TOUCHPAD_NATURAL_SCROLL}" == "true" ]] && echo enabled || echo disabled)")
+        fi
+        sway_dropin_lines+=("input type:touchpad {" "${touchpad_lines[@]}" "}")
+        sway_dropin_add_item "touchpad"
+    fi
+
+    if [[ -n "${SWAY_OUTPUT_SCALE}" ]]; then
+        sway_dropin_lines+=("output * scale ${SWAY_OUTPUT_SCALE}")
+        sway_dropin_add_item "display scaling"
     fi
 
     if [[ -n "${WALLPAPER_PATH}" ]]; then
@@ -322,8 +445,17 @@ if [[ "${target_desktop}" == "sway" ]]; then
     if ((fresh_sway_config)); then
         reset_sway_main_config
     fi
+    ask_sway_questions
     build_sway_dropin
     write_sway_dropin || true
+fi
+
+if ((no_migrate)); then
+    for note in "${manual_notes[@]}"; do
+        log "${note}"
+    done
+    log "Done. No settings were migrated and no backup was read."
+    exit 0
 fi
 
 # Applies DARK_MODE to the target desktop's own native config mechanism.

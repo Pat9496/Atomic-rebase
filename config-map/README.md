@@ -22,7 +22,7 @@ warnings about which of these are solid vs. best-effort.
 | Silverblue (GNOME) | `gsettings get/set org.gnome.desktop.interface accent-color` (one of `blue`/`teal`/`green`/`yellow`/`orange`/`red`/`pink`/`purple`/`slate`/`brown`) | `gsettings get/set org.gnome.desktop.input-sources sources` (xkb layout codes only; variants like `dvorak` are dropped) | `gsettings get/set org.gnome.settings-daemon.plugins.color night-light-enabled`/`-temperature` | `gsettings get/set org.gnome.desktop.screensaver lock-enabled` + `org.gnome.desktop.session idle-delay` (seconds; `0` = never) |
 | Kinoite (KDE Plasma) | Write-only via `plasma-apply-colorscheme --accent-color`, reusing whatever `ColorScheme` is set in `kdeglobals`; **not captured as a source** — no confirmed way to read the active accent color back from disk | `kxkbrc` (group `Layout`, keys `LayoutList`/`Use`), reconfigured via `qdbus`/`qdbus6 org.kde.KWin /KWin reconfigure`; a logout may still be needed | `kwinrc` (group `NightColor`, keys `Active`/`NightTemperature`), same `KWin reconfigure` call | `kscreenlockerrc` (group `Daemon`, keys `Autolock`/`Timeout` — Timeout is **minutes**, converted to/from GNOME's seconds; a captured `0` ("never") is left unset rather than rounded up to 1 minute) |
 | Budgie Atomic  | Same `gsettings`/`accent-color` key as GNOME                                                          | Same `gsettings`/`input-sources` key as GNOME (Budgie relies on gnome-settings-daemon)  | Same `gsettings`/`night-light-*` keys as GNOME                                        | Same `gsettings` keys as GNOME                                                        |
-| Sway Atomic    | Same `gsettings`/`accent-color` key, **GTK apps only**, same caveat as dark mode; also persisted as an `exec_always gsettings set org.gnome.desktop.interface accent-color '<color>'` line in the generated drop-in | *Not captured* — no gnome-settings-daemon runs under Sway, so `input-sources` would be stale, not the real sway-config layout. Can still be **applied** on restore as `input type:keyboard { xkb_layout "<all layouts, comma-separated>" }` in the generated drop-in (all layouts, persistent; variants are still dropped) | *Not captured* — no gnome-settings-daemon runs under Sway to act on these keys | *Not captured* — idle/lock on Sway is handled by the separate `swayidle` program, not a simple config key |
+| Sway Atomic    | Same `gsettings`/`accent-color` key, **GTK apps only**, same caveat as dark mode; also persisted as an `exec_always gsettings set org.gnome.desktop.interface accent-color '<color>'` line in the generated drop-in | *Not captured* — no gnome-settings-daemon runs under Sway, so `input-sources` would be stale, not the real sway-config layout. Can still be **applied** on restore as `input type:keyboard { xkb_layout "<all layouts, comma-separated>" }` in the generated drop-in (all layouts, persistent; variants are still dropped). **Keyboard variants** (e.g. `dvorak`), **display scaling** (0.5–4), and **touchpad settings** (tap-to-click, natural scrolling) can be set via interactive questions when using `restore-config.sh --to sway --no-migrate` in a terminal without `-y` | *Not captured* — no gnome-settings-daemon runs under Sway to act on these keys | *Not captured* — idle/lock on Sway is handled by the separate `swayidle` program, not a simple config key |
 | Cosmic Atomic  | *Not captured* — config format not confirmed                                                          | *Not captured* — config format not confirmed                                          | *Not captured* — config format not confirmed                                          | *Not captured* — config format not confirmed                                          |
 
 | Desktop        | Keyboard repeat rate/delay                                                                              |
@@ -62,16 +62,23 @@ user's `~/.config/sway/config` is **never created or modified** — if one
 exists and has no `config.d` include, the drop-in is still written but will
 not load, and `restore-config.sh` warns and lists the include line to add in
 `MANUAL-STEPS.txt`. An existing `99-atomic-rebase.conf` that lacks the marker
-line is never overwritten. Only values that were actually captured are
-written:
+line is never overwritten.
 
-| Setting | Drop-in content |
-|---------|-----------------|
-| Keyboard layouts | `input type:keyboard { xkb_layout "<list>" }` (all layouts) |
-| Keyboard repeat | `repeat_delay <ms>` and `repeat_rate <chars/sec>` in the same block |
-| Wallpaper | `output * bg "<path>" fill` (only for an existing file whose path can be quoted safely) |
-| Dark mode / accent color | `exec_always gsettings set org.gnome.desktop.interface color-scheme '<prefer-dark\|default>'` and `accent-color '<color>'` |
-| Default terminal | `set $term <bin>` and `bindsym $mod+Return exec <bin>` — **only** if `<bin>` resolves to an executable on the new system (`type -P`); otherwise Fedora's default (`foot`) is left untouched and the name is listed in `MANUAL-STEPS.txt` |
+Values in the drop-in come from either a backup file (if one was read) or
+interactive setup questions (if using `restore-config.sh --to sway --no-migrate`
+in a terminal without `-y`). With a backup or answered questions, only values
+that were actually captured or answered are written:
+
+| Setting | Drop-in content | Source |
+|---------|-----------------|--------|
+| Keyboard layouts | `input type:keyboard { xkb_layout "<list>" }` (all layouts) | Captured from backup, or user answer |
+| Keyboard variants | `xkb_variant "<list>"` inside the same input block (if any) | User answer only (not captured from other desktops) |
+| Display scaling | `output * scale <n>` | User answer only (not captured from other desktops) |
+| Keyboard repeat | `repeat_delay <ms>` and `repeat_rate <chars/sec>` in the same block | Captured from backup only |
+| Touchpad settings | `input type:touchpad { tap <enabled\|disabled>, natural_scroll <enabled\|disabled> }` | User answer only (not captured from other desktops) |
+| Wallpaper | `output * bg "<path>" fill` (only for an existing file whose path can be quoted safely) | Captured from backup only |
+| Dark mode / accent color | `exec_always gsettings set org.gnome.desktop.interface color-scheme '<prefer-dark\|default>'` and `accent-color '<color>'` | Captured from backup, or user answer (for dark mode only) |
+| Default terminal | `set $term <bin>` and `bindsym $mod+Return exec <bin>` — **only** if `<bin>` resolves to an executable on the new system (`type -P`); otherwise Fedora's default (`foot`) is left untouched and the name is listed in `MANUAL-STEPS.txt` | Captured from backup only |
 
 If `SWAYSOCK` is set and `swaymsg` exists, `swaymsg reload` is run afterwards
 (best-effort, never fatal); otherwise the drop-in takes effect on the next
@@ -80,6 +87,13 @@ accent color are re-applied on every Sway start/reload. Keep local overrides
 in a separate file that sorts after `99-atomic-rebase.conf`
 (e.g. `99-local.conf`). Sway as a *source* desktop is unchanged: only
 dark mode and accent color are captured.
+
+When using `restore-config.sh --to sway --no-migrate` (no backup), the script
+does not read settings from a backup, does not re-layer packages, and does not
+write `MANUAL-STEPS.txt`. In a terminal without `-y`, interactive questions
+are asked. This is useful when rebasing with `Atomic-rebase.sh --no-migrate`
+and still wanting to set up keyboard/display/touchpad preferences with guided
+questions rather than editing the drop-in by hand.
 
 ## Captured for reference only (nothing to restore)
 

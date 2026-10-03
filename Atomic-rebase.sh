@@ -10,10 +10,11 @@ require_not_root
 
 TARGET=""
 DRY_RUN=0
+NO_MIGRATE=0
 ASSUME_YES="${ASSUME_YES:-0}"
 
 usage() {
-    printf 'Usage: %s --to <%s> [-y|--yes] [--dry-run]\n' \
+    printf 'Usage: %s --to <%s> [--no-migrate] [-y|--yes] [--dry-run]\n' \
         "$(basename "${BASH_SOURCE[0]}")" "$(known_desktops | paste -sd'|')" >&2
 }
 
@@ -26,6 +27,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -y|--yes)
             ASSUME_YES=1
+            shift
+            ;;
+        --no-migrate)
+            NO_MIGRATE=1
             shift
             ;;
         --dry-run)
@@ -72,7 +77,11 @@ if [[ "${DESKTOP_OFFICIAL[$TARGET]}" != "1" ]]; then
 fi
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
-    log "Dry run: would back up current settings, then run: sudo rpm-ostree rebase ${target_ref}"
+    if [[ "${NO_MIGRATE}" -eq 1 ]]; then
+        log "Dry run: would run without backing up settings: sudo rpm-ostree rebase ${target_ref}"
+    else
+        log "Dry run: would back up current settings, then run: sudo rpm-ostree rebase ${target_ref}"
+    fi
     exit 0
 fi
 
@@ -81,12 +90,23 @@ if ! confirm "Proceed with rebasing to ${target_ref}?"; then
     exit 1
 fi
 
-backup_dir="$("${SCRIPT_DIR}/bin/lib/backup-config.sh")"
-log "Settings backed up to ${backup_dir}"
+if [[ "${NO_MIGRATE}" -eq 1 ]]; then
+    log "Skipping settings backup (--no-migrate)."
+else
+    backup_dir="$("${SCRIPT_DIR}/bin/lib/backup-config.sh")"
+    log "Settings backed up to ${backup_dir}"
+fi
 
 sudo rpm-ostree rebase "${target_ref}"
 
 log "Rebase staged successfully."
 log "Next steps:"
 log "  1. Reboot into the new deployment."
-log "  2. Run: ${SCRIPT_DIR}/bin/lib/restore-config.sh --to ${TARGET}"
+if [[ "${NO_MIGRATE}" -eq 0 ]]; then
+    log "  2. Run: ${SCRIPT_DIR}/bin/lib/restore-config.sh --to ${TARGET}"
+elif [[ "${TARGET}" == "sway" ]]; then
+    log "  2. Run: ${SCRIPT_DIR}/bin/lib/restore-config.sh --to sway --no-migrate"
+    log "     It asks a few questions (keyboard layout, scaling, touchpad) and writes them to the sway config."
+else
+    log "  No settings were backed up, so there is nothing to restore."
+fi
