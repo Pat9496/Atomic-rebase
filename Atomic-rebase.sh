@@ -76,6 +76,18 @@ if [[ "${DESKTOP_OFFICIAL[$TARGET]}" != "1" ]]; then
     warn "${TARGET} is published under a separate registry namespace (quay.io/fedora-ostree-desktops) that isn't covered by the pre-configured signed 'fedora' ostree remote. It will be pulled unverified."
 fi
 
+nvidia_kargs_found=()
+nvidia_packages_found=()
+if [[ "${TARGET}" == "sway" ]]; then
+    mapfile -t nvidia_kargs_found < <(nvidia_kargs)
+    mapfile -t nvidia_packages_found < <(nvidia_layered_packages)
+    if [[ "${#nvidia_kargs_found[@]}" -gt 0 || "${#nvidia_packages_found[@]}" -gt 0 ]]; then
+        warn "Proprietary NVIDIA setup detected. It carries over to the Sway image, where boot can hang before the login screen."
+        [[ "${#nvidia_kargs_found[@]}" -eq 0 ]] || warn "  Kernel arguments: ${nvidia_kargs_found[*]}"
+        [[ "${#nvidia_packages_found[@]}" -eq 0 ]] || warn "  Layered packages: ${nvidia_packages_found[*]}"
+    fi
+fi
+
 if [[ "${DRY_RUN}" -eq 1 ]]; then
     if [[ "${NO_MIGRATE}" -eq 1 ]]; then
         log "Dry run: would run without backing up settings: sudo rpm-ostree rebase ${target_ref}"
@@ -88,6 +100,19 @@ fi
 if ! confirm "Proceed with rebasing to ${target_ref}?"; then
     log "Aborted by user."
     exit 1
+fi
+
+if [[ "${#nvidia_kargs_found[@]}" -gt 0 || "${#nvidia_packages_found[@]}" -gt 0 ]]; then
+    if confirm "Remove these NVIDIA kernel arguments and layered packages before rebasing (Sway will use nouveau/Intel)?"; then
+        for karg in "${nvidia_kargs_found[@]}"; do
+            sudo rpm-ostree kargs "--delete=${karg}"
+        done
+        if [[ "${#nvidia_packages_found[@]}" -gt 0 ]]; then
+            sudo rpm-ostree uninstall "${nvidia_packages_found[@]}"
+        fi
+    else
+        warn "Keeping the NVIDIA setup; if Sway hangs at boot, roll back with: sudo rpm-ostree rollback -r"
+    fi
 fi
 
 if [[ "${NO_MIGRATE}" -eq 1 ]]; then

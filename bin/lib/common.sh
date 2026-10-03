@@ -255,7 +255,7 @@ get_current_image_ref() {
 # Identifies which known Fedora Atomic Desktop image a full image reference
 # belongs to, by checking whether the reference contains one of the registry
 # paths in DESKTOP_IMAGE. This deliberately avoids parsing the transport
-# prefix (ostree-image-signed:docker://, ostree-unverified-registry:,
+# prefix (ostree-unverified-registry:, ostree-image-signed:docker://,
 # docker://, oci://, @sha256: digest pins, ...) since rpm-ostree accepts many
 # equivalent forms for the same image and the registry path substring is the
 # part that reliably identifies which desktop is booted.
@@ -353,8 +353,10 @@ latest_stable_tag_for_image() {
 # only numeric major-version tags, so latest_stable_tag_for_image uses the
 # current stable Fedora release number (from Bodhi) as the tag. Also picks
 # the canonical transport for the target's trust level
-# (ostree-image-signed:docker:// for the images with sigstore signatures
-# verified through the host policy, ostree-unverified-registry: for the rest).
+# (ostree-unverified-registry: for all images: ostree-image-signed: needs a
+# sigstore policy for quay.io/fedora in /etc/containers/policy.json, which a
+# stock host lacks, and ostree-remote-registry:fedora: fails to import the
+# Sway image with "Expected commitmeta object, not DirMeta").
 compute_target_image_ref() {
     local current_ref="$1" target="$2"
 
@@ -371,7 +373,7 @@ compute_target_image_ref() {
     fi
 
     if [[ "${DESKTOP_OFFICIAL[$target]}" == "1" ]]; then
-        printf 'ostree-image-signed:docker://%s:latest\n' "${DESKTOP_IMAGE[$target]}"
+        printf 'ostree-unverified-registry:%s:latest\n' "${DESKTOP_IMAGE[$target]}"
     else
         local tag
         tag="$(latest_stable_tag_for_image "${DESKTOP_IMAGE[$target]}")" || return 1
@@ -450,4 +452,30 @@ accountsservice_icon_file() {
     [[ "${icon}" == /* ]] || return
 
     printf '%s\n' "${icon}"
+}
+
+# Kernel arguments and layered packages that proprietary-NVIDIA setups add on
+# the old desktop. Both survive a rebase and break Sway: the nouveau blacklist
+# keeps the open driver from loading, and Sway's greetd greeter cannot start
+# on the proprietary driver (it needs --unsupported-gpu), so boot hangs
+# before the login screen.
+readonly NVIDIA_KARG_REGEX='^(rd\.driver\.blacklist=nouveau|modprobe\.blacklist=nouveau|nvidia-drm\.[a-z_]+=.*)$'
+readonly NVIDIA_PACKAGE_REGEX='^(akmod-nvidia.*|kmod-nvidia.*|xorg-x11-drv-nvidia.*|nvidia-.*)$'
+
+nvidia_kargs() {
+    local arg
+    local -a args=()
+    IFS=' ' read -ra args < <(rpm-ostree kargs 2>/dev/null || true) || true
+    for arg in "${args[@]}"; do
+        if [[ "${arg}" =~ ${NVIDIA_KARG_REGEX} ]]; then
+            printf '%s\n' "${arg}"
+        fi
+    done
+}
+
+nvidia_layered_packages() {
+    command -v jq >/dev/null 2>&1 || return 0
+    rpm-ostree status --json 2>/dev/null \
+        | jq -r '.deployments[] | select(.booted==true) | ."requested-packages"[]?' 2>/dev/null \
+        | grep -E "${NVIDIA_PACKAGE_REGEX}" || true
 }
